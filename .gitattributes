@@ -1,0 +1,7 @@
+# Saltos de línea LF en todo sistema operativo: el SHA-256 de cada archivo de
+# entrada (R-007) debe ser el mismo en cualquier clon del repositorio.
+* text=auto eol=lf
+
+# Mallas e imágenes médicas: binarios, Git nunca debe convertirlos.
+*.stl binary
+*.dcm binary
