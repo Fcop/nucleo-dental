@@ -1,0 +1,8 @@
+{
+  "distancia_mm": 1.45,
+  "colision": false,
+  "penetracion_mm": 0,
+  "semaforo": "rojo",
+  "codigo_salida": 2,
+  "tolerancia_mm": 0.05
+}

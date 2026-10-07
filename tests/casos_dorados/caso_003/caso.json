@@ -1,0 +1,5 @@
+{
+  "canal": "../canal_recto.stl",
+  "implante": {"diametro": 4.1, "largo": 10.0, "apice": [0, 0, 1.0], "eje": [0, 0, 1]},
+  "margen": 2.0
+}

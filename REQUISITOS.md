@@ -10,3 +10,4 @@
 | R-006 | Semáforo: verde si distancia ≥ margen; rojo si distancia < margen o colisión. Margen por defecto 2,0 mm, configurable con --margen | casos dorados 001-003 |
 | R-007 | Cada salida incluye versión del motor, commit de git, parámetros, SHA-256 de cada archivo de entrada y fecha-hora UTC | test_trazabilidad |
 | R-008 | Código de salida: 0 = verde, 2 = rojo, 1 = error de entrada | test_codigos_salida |
+| R-009 | Toda salida incluye `penetracion_mm`: profundidad máxima de invasión, es decir, la mayor distancia a la superficie del canal entre los puntos del implante que quedan dentro del canal; 0 si no hay colisión. Error ≤ 0,05 mm. La invasión nunca se reporta en `distancia_mm`, que no toma valores negativos | casos dorados 001-004 |

@@ -7,4 +7,5 @@
 | RG-003 | Eje del implante invertido | Ápice donde va la plataforma | R-003; test_eje_invertido |
 | RG-004 | Medir solo contra vértices de una malla gruesa | Distancia sobreestimada | R-004 (superficie); pendiente caso con malla gruesa |
 | RG-005 | Datos de pacientes en repo público | Incumplimiento Ley 21.719 | .gitignore; solo casos sintéticos; regla 8 de CLAUDE.md |
-| RG-006 | Cambio de API de VTK altera resultados | Error silencioso | vtk fijado <9.7; casos dorados en cada cambio |
+| RG-006 | Cambio de API de VTK altera resultados | Error silencioso | vtk fijado <9.7; numpy fijado <2.5; casos dorados en cada cambio |
+| RG-007 | Invasión del canal leída como holgura, o sin gravedad visible | Plan inseguro aceptado, o corrección insuficiente | R-009: penetración en campo propio, nunca como distancia positiva; casos 003-004 |
