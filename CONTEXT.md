@@ -1,0 +1,63 @@
+# nucleo-dental
+
+Núcleo sin interfaz para planificar implantes dentales guiados y evaluar su seguridad respecto de estructuras anatómicas. Este glosario fija el significado de cada término en el código, los tests y la documentación.
+
+## Geometría del implante
+
+**Implante**:
+Cilindro sólido definido por diámetro, largo, ápice y eje.
+_Evitar_: fixture, tornillo
+
+**Ápice**:
+Centro de la punta del implante, el extremo que entra primero en el hueso.
+_Evitar_: punta (como término técnico), extremo apical
+
+**Plataforma**:
+Centro del extremo coronal del implante, a un largo del ápice en la dirección del eje.
+_Evitar_: cabeza, cuello
+
+**Eje**:
+Dirección unitaria que va del ápice a la plataforma.
+_Evitar_: orientación, dirección de inserción
+
+## Anatomía
+
+**Canal mandibular**:
+Superficie cerrada que delimita el conducto del nervio alveolar inferior.
+_Evitar_: nervio (cuando se habla de la geometría), conducto dentario
+
+## Evaluación de seguridad
+
+**Distancia**:
+Separación mínima medida entre la superficie del implante y la del canal mandibular; nunca es negativa y vale 0 cuando hay colisión.
+_Evitar_: margen, holgura, distancia de seguridad
+
+**Margen**:
+Distancia mínima que el clínico exige entre implante y canal mandibular para aceptar un plan; es una regla, no una medición.
+_Evitar_: distancia de seguridad, distancia, zona de seguridad
+
+**Colisión**:
+Situación en que el implante y el canal mandibular comparten volumen o se tocan.
+_Evitar_: choque, contacto, intersección
+
+**Penetración**:
+Profundidad máxima a la que el implante se mete en el canal mandibular, medida desde la pared del canal; vale 0 si no hay colisión.
+_Evitar_: distancia negativa, invasión
+
+**Semáforo**:
+Veredicto del plan: verde si la distancia alcanza el margen, rojo si no lo alcanza o si hay colisión.
+_Evitar_: alerta, estado, resultado
+
+**Sobrefresado**:
+Tramo que la fresa avanza más allá del ápice del implante según el kit guiado.
+_Evitar_: sobreperforación, exceso de fresa
+
+## Validación
+
+**Caso dorado**:
+Escenario sintético cuyo resultado esperado fue calculado a mano por una persona, independiente del código que lo verifica.
+_Evitar_: fixture, caso de prueba (a secas)
+
+**LPS**:
+Sistema de coordenadas del proyecto: x crece hacia la izquierda del paciente, y hacia posterior, z hacia superior; unidades en mm.
+_Evitar_: RAS (es otro sistema, el de Slicer)
