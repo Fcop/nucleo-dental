@@ -5,7 +5,7 @@
 | RG-001 | Implante cerca del canal no detectado | Lesión del nervio alveolar inferior | R-004, R-006, casos 001-003 |
 | RG-002 | Coordenadas RAS mezcladas con LPS | Medición en el lugar equivocado sin aviso | R-002; chequeo de bordes (Paso 7) |
 | RG-003 | Eje del implante invertido | Ápice donde va la plataforma | R-003; test_eje_invertido |
-| RG-004 | Medir solo contra vértices de una malla gruesa | Distancia sobreestimada | R-004 (superficie); pendiente caso con malla gruesa |
+| RG-004 | Medir solo contra vértices de una malla gruesa | Distancia sobreestimada | R-004 (superficie); caso dorado 005: con solo vértices daría 18,07 mm (verde) en vez de 1,5 mm (rojo) |
 | RG-005 | Datos de pacientes en repo público | Incumplimiento Ley 21.719 | .gitignore; solo casos sintéticos; regla 8 de CLAUDE.md |
 | RG-006 | Cambio de API de VTK altera resultados | Error silencioso | vtk fijado <9.7; numpy fijado <2.5; casos dorados en cada cambio |
 | RG-007 | Penetración en el canal leída como holgura, o sin gravedad visible | Plan inseguro aceptado, o corrección insuficiente | R-009: penetración en campo propio, nunca como distancia positiva; casos 003-004 |

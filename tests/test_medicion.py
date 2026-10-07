@@ -27,9 +27,9 @@ def _cargar_caso(carpeta: Path):
 
 
 def test_hay_casos_dorados():
-    """Verifica R-004: existen los cuatro casos dorados escritos a mano."""
+    """Verifica R-004: existen los casos dorados escritos a mano (005 = malla gruesa, RG-004)."""
     assert [c.name for c in CARPETAS_DORADAS] == [
-        "caso_001", "caso_002", "caso_003", "caso_004_eje_invertido"]
+        "caso_001", "caso_002", "caso_003", "caso_004_eje_invertido", "caso_005_malla_gruesa"]
 
 
 def _implante_caso_001() -> Implante:
