@@ -291,18 +291,11 @@ def extraer_parche(pd_hueso: vtk.vtkPolyData,
 
     n = len(seleccionados)
     celdas = vtk.vtkCellArray()
-    try:                                        # API moderna (VTK 9)
-        desplazamientos = (np.arange(n + 1, dtype=np.int64) * 3)
-        celdas.SetData(
-            numpy_support.numpy_to_vtkIdTypeArray(desplazamientos, deep=True),
-            numpy_support.numpy_to_vtkIdTypeArray(
-                np.ascontiguousarray(seleccionados.ravel()), deep=True))
-    except AttributeError:                      # formato legacy
-        plano = np.empty((n, 4), dtype=np.int64)
-        plano[:, 0] = 3
-        plano[:, 1:] = seleccionados
-        celdas.SetCells(n, numpy_support.numpy_to_vtkIdTypeArray(
-            np.ascontiguousarray(plano.ravel()), deep=True))
+    desplazamientos = (np.arange(n + 1, dtype=np.int64) * 3)
+    celdas.SetData(
+        numpy_support.numpy_to_vtkIdTypeArray(desplazamientos, deep=True),
+        numpy_support.numpy_to_vtkIdTypeArray(
+            np.ascontiguousarray(seleccionados.ravel()), deep=True))
 
     parche = vtk.vtkPolyData()
     parche.SetPoints(pd.GetPoints())
