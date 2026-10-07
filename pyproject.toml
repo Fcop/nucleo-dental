@@ -9,7 +9,7 @@ description = "Núcleo de planificación de implantes guiados, sin interfaz"
 requires-python = ">=3.12,<3.13"
 license = "MIT"
 dependencies = [
-  "numpy>=1.26",
+  "numpy>=1.26,<2.5",
   "vtk>=9.4,<9.7",
 ]
 

@@ -13,7 +13,8 @@ clínico tras validación. Trátalo como software médico.
 5. NUNCA modifiques tests/casos_dorados/*/esperado.json ni sus valores.
    Si un test dorado falla, el error está en el código: avísame y detente.
 6. Operaciones geométricas vectorizadas con numpy; nada de bucles Python
-   sobre vértices o caras.
+   sobre vértices o caras. Única excepción aceptada: el modo "rayo" de
+   geometria/undercut_core.py (referencia de validación, anotada en el código).
 7. Antes de dar una tarea por terminada, ejecuta `pytest` y muéstrame
    el resultado completo.
 8. Nunca agregues archivos DICOM ni datos de pacientes al repositorio.

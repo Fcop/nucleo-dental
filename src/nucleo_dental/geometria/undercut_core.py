@@ -578,6 +578,9 @@ def detectar_undercuts(pd: vtk.vtkPolyData, eje=(0, 0, 1),
 
     marcas = np.zeros(n_caras, dtype=bool)
     hits = vtk.vtkPoints()
+    # EXCEPCION A LA REGLA 6 DE CLAUDE.md (bucle Python sobre caras): el modo
+    # "rayo" es la referencia de validacion de los modos vectorizados, acotado
+    # a mallas chicas por la advertencia de arriba. No usar en flujo clinico.
     for i in range(n_caras):
         # despegar segun la NORMAL, no segun el eje: evita que el rayo
         # golpee triangulos vecinos coplanares en paredes verticales

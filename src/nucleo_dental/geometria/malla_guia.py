@@ -717,20 +717,30 @@ def validar_guia(guia: vtk.vtkPolyData, hueso: vtk.vtkPolyData = None,
 # ---------------------------------------------------------------------------
 
 def exportar_stl(pd: vtk.vtkPolyData, ruta: str,
-                 sistema: str = "LPS") -> str:
-    """Exporta a STL binario.
+                 sistema_entrada: str = "LPS") -> str:
+    """Exporta a STL binario. El archivo SIEMPRE queda en LPS (R-002).
 
-    Slicer trabaja en RAS; los slicers de impresion y la mayoria del software
-    de planificacion esperan LPS. Sin la conversion la guia sale rotada 180
-    grados respecto a las referencias del caso.
+    sistema_entrada : sistema de coordenadas en que viene `pd`.
+        "LPS" (por defecto) -> se escribe tal cual; es el sistema del nucleo.
+        "RAS"               -> se convierte a LPS antes de escribir. Usalo
+                               solo con mallas que vienen de Slicer.
+
+    La entrada RAS debe declararse de forma explicita: con el default
+    anterior (convertir siempre) una malla del nucleo, ya en LPS, salia
+    rotada 180 grados sin aviso (RG-002).
 
     RAS -> LPS es (x, y, z) -> (-x, -y, z), cuyo determinante vale +1: es una
     rotacion, no una reflexion. El winding de los triangulos NO se invierte y
     no hay que aplicar vtkReverseSense. (La version anterior de este modulo lo
     hacia y dejaba todas las normales al reves.)
     """
+    sistema_entrada = sistema_entrada.upper()
+    if sistema_entrada not in ("LPS", "RAS"):
+        raise ValueError(
+            "sistema_entrada debe ser 'LPS' o 'RAS', no '%s'." % sistema_entrada)
+
     a_escribir = pd
-    if sistema.upper() == "LPS":
+    if sistema_entrada == "RAS":
         tr = vtk.vtkTransform()
         tr.Scale(-1.0, -1.0, 1.0)
         f = vtk.vtkTransformPolyDataFilter()
