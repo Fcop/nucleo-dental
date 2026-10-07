@@ -7,6 +7,8 @@ clínico tras validación. Trátalo como software médico.
 ## Reglas
 1. Código, comentarios y documentación en español.
 2. Prohibido importar slicer, qt, ctk o mrml en src/. Solo numpy y vtk.
+   Única excepción: SimpleITK, opcional, importado solo dentro de cbct.py
+   para leer DICOM (extra `[cbct]` de pyproject.toml).
 3. Unidades en mm. Sistema de coordenadas LPS en toda entrada y salida.
 4. Todo requisito de REQUISITOS.md tiene al menos un test que lo cite
    en su docstring (ej. "Verifica R-004").

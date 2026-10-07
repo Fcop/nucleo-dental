@@ -91,6 +91,22 @@ def test_parametros_sueltos_equivalen_al_caso():
     assert [Path(a["ruta"]).resolve() for a in salida["trazabilidad"]["archivos_entrada"]] == [CANAL_RECTO.resolve()]
 
 
+@pytest.mark.parametrize("forma", ["separado", "con_igual"])
+def test_coordenadas_negativas(forma):
+    """Verifica R-002: --apice y --eje aceptan coordenadas negativas, habituales en LPS.
+
+    Caso 001 con el eje invertido escrito como 0,0,-1: el implante atraviesa el canal (rojo, 2).
+    """
+    eje = ["--eje", "0,0,-1"] if forma == "separado" else ["--eje=0,0,-1"]
+    apice = ["--apice", "-0,0,4"] if forma == "separado" else ["--apice=-0,0,4"]
+    codigo, salida, stderr = ejecutar(
+        "medir", "--canal", CANAL_RECTO, "--diametro", 4.1, "--largo", 10, *apice, *eje)
+    assert salida is not None, stderr
+    assert salida["parametros"]["implante"]["eje"] == [0, 0, -1]
+    assert salida["resultado"]["colision"] is True
+    assert codigo == 2
+
+
 def test_codigos_salida():
     """Verifica R-008: 0 = verde, 2 = rojo."""
     assert ejecutar("medir", "--caso", CASOS_DORADOS / "caso_001" / "caso.json")[0] == 0

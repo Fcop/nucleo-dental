@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from vtk.util import numpy_support
+
 from nucleo_dental.implante import Implante
 from nucleo_dental.medicion import MARGEN_POR_DEFECTO_MM, leer_stl, medir
 
@@ -44,7 +46,7 @@ def main(argv=None) -> int:
     for flujo in (sys.stdout, sys.stderr):
         flujo.reconfigure(encoding="utf-8")
     try:
-        args = _crear_parser().parse_args(argv)
+        args = _crear_parser().parse_args(_unir_vectores_negativos(sys.argv[1:] if argv is None else argv))
         if args.comando is None:
             raise ErrorEntrada("falta el subcomando. Uso: nucleo-dental medir --caso ruta/caso.json")
         salida = _medir(args)
@@ -54,6 +56,23 @@ def main(argv=None) -> int:
 
     print(json.dumps(salida, ensure_ascii=False, indent=2))
     return CODIGO_VERDE if salida["resultado"]["semaforo"] == "verde" else CODIGO_ROJO
+
+
+def _unir_vectores_negativos(argv: list[str]) -> list[str]:
+    """Convierte `--apice -30,-40,4` en `--apice=-30,-40,4`.
+
+    argparse toma un valor que empieza con '-' por otra opción. En LPS las
+    coordenadas negativas son habituales, así que se unen al flag.
+    """
+    resultado, i = [], 0
+    while i < len(argv):
+        if argv[i] in ("--apice", "--eje") and i + 1 < len(argv) and argv[i + 1].startswith("-"):
+            resultado.append(f"{argv[i]}={argv[i + 1]}")
+            i += 2
+        else:
+            resultado.append(argv[i])
+            i += 1
+    return resultado
 
 
 def _crear_parser() -> argparse.ArgumentParser:
@@ -67,6 +86,8 @@ def _crear_parser() -> argparse.ArgumentParser:
     m.add_argument("--apice", help="Ápice x,y,z en LPS y mm.")
     m.add_argument("--eje", help="Eje dx,dy,dz del ápice a la plataforma.")
     m.add_argument("--margen", help=f"Margen en mm (por defecto {MARGEN_POR_DEFECTO_MM}).")
+    m.add_argument("--cbct", help="Carpeta con la serie DICOM del CBCT: verifica que canal e implante "
+                                  "caigan dentro del volumen (detecta RAS/LPS mezclados). Requiere SimpleITK.")
     return parser
 
 
@@ -99,9 +120,20 @@ def _medir(args) -> dict:
 
     implante = Implante(implante_dict["diametro"], implante_dict["largo"],
                         implante_dict["apice"], implante_dict["eje"])
-    resultado = medir(implante, leer_stl(ruta_canal), margen)
+    canal = leer_stl(ruta_canal)
 
-    return {
+    cbct = None
+    if args.cbct is not None:
+        from nucleo_dental.cbct import exigir_dentro_del_volumen, leer_cbct
+
+        volumen = leer_cbct(args.cbct)
+        vertices = numpy_support.vtk_to_numpy(canal.GetPoints().GetData())
+        exigir_dentro_del_volumen(volumen, vertices, implante)
+        cbct = volumen.descripcion()
+
+    resultado = medir(implante, canal, margen)
+
+    salida = {
         "resultado": resultado,
         "parametros": {
             "canal": str(ruta_canal),
@@ -112,6 +144,9 @@ def _medir(args) -> dict:
         },
         "trazabilidad": _trazabilidad(archivos),
     }
+    if cbct is not None:
+        salida["cbct"] = cbct
+    return salida
 
 
 def _leer_caso(ruta: Path) -> dict:

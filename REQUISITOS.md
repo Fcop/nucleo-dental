@@ -11,6 +11,7 @@
 | R-007 | Cada salida incluye versión del motor, commit de git, parámetros, SHA-256 de cada archivo de entrada y fecha-hora UTC | test_trazabilidad |
 | R-008 | Código de salida: 0 = verde, 2 = rojo, 1 = error de entrada | test_codigos_salida |
 | R-009 | Toda salida incluye `penetracion_mm`: la mayor distancia a la superficie del canal entre los puntos del implante que quedan dentro del canal; 0 si no hay colisión. Error ≤ 0,05 mm. La penetración nunca se reporta en `distancia_mm`, que no toma valores negativos | casos dorados 001-004 |
+| R-010 | Con --cbct, el comando verifica que todos los vértices del canal, el ápice y la plataforma caen dentro de la caja física del CBCT (calculada con origen, espaciado, tamaño y matriz de dirección); si no, termina con código 1 y sugiere revisar RAS/LPS. La salida incluye tamaño, espaciado, origen, dirección, SHA-256 del primer archivo y de la serie completa | test_fuera_de_volumen, test_implante_fuera_de_volumen, test_volumen_oblicuo_usa_la_matriz_de_direccion |
 
 ## Requisitos pendientes (fuera de v0.0.1)
 

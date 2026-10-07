@@ -14,7 +14,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "SimpleITK>=2.3"]
+cbct = ["SimpleITK>=2.3"]
 
 [project.scripts]
 nucleo-dental = "nucleo_dental.cli:main"
