@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nucleo-dental"
+version = "0.0.1"
+description = "Núcleo de planificación de implantes guiados, sin interfaz"
+requires-python = ">=3.12,<3.13"
+license = "MIT"
+dependencies = [
+  "numpy>=1.26",
+  "vtk>=9.4,<9.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+nucleo-dental = "nucleo_dental.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nucleo_dental"]
