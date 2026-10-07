@@ -76,9 +76,10 @@ def construir_canal() -> vtk.vtkPolyData:
     vtk_puntos.SetData(numpy_support.numpy_to_vtk(puntos, deep=True))
     pd.SetPoints(vtk_puntos)
 
-    celdas = np.hstack([np.full((len(triangulos), 1), 3, dtype=np.int64), triangulos]).ravel()
+    offsets = np.arange(0, 3 * len(triangulos) + 1, 3, dtype=np.int64)
     vtk_celdas = vtk.vtkCellArray()
-    vtk_celdas.SetCells(len(triangulos), numpy_support.numpy_to_vtkIdTypeArray(celdas, deep=True))
+    vtk_celdas.SetData(numpy_support.numpy_to_vtkIdTypeArray(offsets, deep=True),
+                       numpy_support.numpy_to_vtkIdTypeArray(triangulos.ravel(), deep=True))
     pd.SetPolys(vtk_celdas)
     return pd
 
