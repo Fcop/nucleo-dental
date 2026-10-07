@@ -68,6 +68,46 @@ class Implante:
         """True por cada punto (N×3) dentro del cilindro o sobre su superficie."""
         return self.distancia_a_puntos(puntos) <= TOLERANCIA_SUPERFICIE_MM
 
+    def puntos_superficie(self, paso: float) -> np.ndarray:
+        """Puntos (N×3) sobre toda la superficie, separados a lo más `paso` mm.
+
+        Incluye el centro de cada tapa y los bordes exactos (ápice y plataforma).
+        """
+        e1, e2 = self._base_perpendicular()
+        n_vueltas = max(int(np.ceil(2 * np.pi * self.radio / paso)), 3)
+        n_alturas = max(int(np.ceil(self.largo / paso)), 1) + 1
+
+        angulos = 2 * np.pi * np.arange(n_vueltas) / n_vueltas
+        alturas = np.linspace(0.0, self.largo, n_alturas)
+        aro = self.radio * (np.cos(angulos)[:, None] * e1 + np.sin(angulos)[:, None] * e2)
+        pared = (self.apice + alturas[:, None, None] * self.eje + aro[None, :, :]).reshape(-1, 3)
+
+        disco = self._disco(paso, e1, e2)
+        tapas = np.vstack([self.apice + disco, self.plataforma + disco])
+        return np.vstack([pared, tapas])
+
+    def puntos_interiores(self, paso: float) -> np.ndarray:
+        """Puntos (N×3) en una grilla de lado `paso` que llena el volumen, incluido el eje."""
+        e1, e2 = self._base_perpendicular()
+        n_lado = int(np.ceil(self.radio / paso))
+        coord = paso * np.arange(-n_lado, n_lado + 1)
+        u1, u2 = np.meshgrid(coord, coord, indexing="ij")
+        dentro = u1 ** 2 + u2 ** 2 <= self.radio ** 2
+        seccion = u1[dentro][:, None] * e1 + u2[dentro][:, None] * e2
+        alturas = np.linspace(0.0, self.largo, max(int(np.ceil(self.largo / paso)), 1) + 1)
+        return (self.apice + alturas[:, None, None] * self.eje + seccion[None, :, :]).reshape(-1, 3)
+
+    def _disco(self, paso: float, e1, e2) -> np.ndarray:
+        """Puntos de un disco de radio R centrado en el origen, en anillos concéntricos."""
+        n_anillos = max(int(np.ceil(self.radio / paso)), 1)
+        radios = np.linspace(0.0, self.radio, n_anillos + 1)
+        n_por_anillo = np.maximum(np.ceil(2 * np.pi * radios / paso).astype(int), 1)
+        indice_anillo = np.repeat(np.arange(len(radios)), n_por_anillo)
+        posicion = np.arange(n_por_anillo.sum()) - np.repeat(np.cumsum(n_por_anillo) - n_por_anillo, n_por_anillo)
+        angulo = 2 * np.pi * posicion / n_por_anillo[indice_anillo]
+        r = radios[indice_anillo]
+        return (r * np.cos(angulo))[:, None] * e1 + (r * np.sin(angulo))[:, None] * e2
+
     def como_malla(self, lados: int = 64):
         """Superficie triangulada cerrada del implante, con normales hacia afuera.
 
