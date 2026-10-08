@@ -3,9 +3,12 @@
     nucleo-dental medir --caso ruta/caso.json
     nucleo-dental medir --canal canal.stl --diametro 4.1 --largo 10 \\
                         --apice x,y,z --eje dx,dy,dz [--margen 2.0]
+    nucleo-dental registrar --escaneo escaneo.stl --dientes dientes.stl \\
+                            [--punto x,y,z] [--salida escaneo_registrado.stl]
 
 Imprime un JSON con el resultado, los parámetros y la trazabilidad.
-Códigos de salida: 0 = verde, 2 = rojo, 1 = error de entrada.
+Códigos de salida de `medir`: 0 = verde, 2 = rojo, 1 = error de entrada.
+Códigos de salida de `registrar`: 0 = registrado, 1 = error de entrada.
 """
 
 from __future__ import annotations
@@ -57,13 +60,16 @@ def main(argv=None) -> int:
     try:
         args = _crear_parser().parse_args(_unir_vectores_negativos(sys.argv[1:] if argv is None else argv))
         if args.comando is None:
-            raise ErrorEntrada("falta el subcomando. Uso: nucleo-dental medir --caso ruta/caso.json")
-        salida = _medir(args)
+            raise ErrorEntrada("falta el subcomando. Uso: nucleo-dental medir --caso ruta/caso.json "
+                               "o nucleo-dental registrar --escaneo … --dientes …")
+        salida = _registrar(args) if args.comando == "registrar" else _medir(args)
     except (ErrorEntrada, ValueError) as error:
         print(f"Error de entrada: {error}", file=sys.stderr)
         return CODIGO_ERROR_ENTRADA
 
     print(json.dumps(salida, ensure_ascii=False, indent=2))
+    if args.comando == "registrar":
+        return CODIGO_VERDE
     return CODIGO_VERDE if salida["resultado"]["semaforo"] == "verde" else CODIGO_ROJO
 
 
@@ -75,7 +81,7 @@ def _unir_vectores_negativos(argv: list[str]) -> list[str]:
     """
     resultado, i = [], 0
     while i < len(argv):
-        if argv[i] in ("--apice", "--eje") and i + 1 < len(argv) and argv[i + 1].startswith("-"):
+        if argv[i] in ("--apice", "--eje", "--punto") and i + 1 < len(argv) and argv[i + 1].startswith("-"):
             resultado.append(f"{argv[i]}={argv[i + 1]}")
             i += 2
         else:
@@ -107,7 +113,45 @@ def _crear_parser() -> argparse.ArgumentParser:
     m.add_argument("--margen-hueso", help=f"Espesor óseo mínimo en mm (por defecto {MARGEN_HUESO_POR_DEFECTO_MM}).")
     m.add_argument("--cbct", help="Carpeta con la serie DICOM del CBCT: verifica que canal e implante "
                                   "caigan dentro del volumen (detecta RAS/LPS mezclados). Requiere SimpleITK.")
+
+    r = sub.add_parser("registrar", help="Refina el registro del escaneo intraoral sobre los dientes del CBCT.")
+    r.add_argument("--escaneo", help="STL del escaneo intraoral, ya alineado aproximadamente (p. ej. por puntos en Slicer), en LPS.")
+    r.add_argument("--dientes", help="STL de los dientes segmentados del CBCT, en LPS.")
+    r.add_argument("--punto", help="Punto x,y,z (LPS) donde informar cuánto mueve la corrección, p. ej. el ápice.")
+    r.add_argument("--salida", help="Ruta donde guardar el escaneo registrado (STL).")
     return parser
+
+
+def _registrar(args) -> dict:
+    """Subcomando `registrar` (R-015)."""
+    from nucleo_dental.registro import refinar_registro, transformar_malla
+
+    faltan = [f"--{n}" for n in ("escaneo", "dientes") if getattr(args, n) is None]
+    if faltan:
+        raise ErrorEntrada("faltan parámetros: " + ", ".join(faltan))
+    ruta_escaneo, ruta_dientes = Path(args.escaneo), Path(args.dientes)
+    punto = _vector(args.punto, "--punto") if args.punto is not None else None
+    escaneo = leer_stl(ruta_escaneo)
+    registro = refinar_registro(escaneo, leer_stl(ruta_dientes), punto=punto)
+
+    salida = {
+        "registro": registro,
+        "parametros": {"escaneo": str(ruta_escaneo), "dientes": str(ruta_dientes), "punto": punto,
+                       "sistema_coordenadas": "LPS", "unidades": "mm"},
+        "trazabilidad": _trazabilidad([ruta_escaneo, ruta_dientes]),
+    }
+    if args.salida is not None:
+        import vtk
+
+        ruta_salida = Path(args.salida)
+        escritor = vtk.vtkSTLWriter()
+        escritor.SetInputData(transformar_malla(escaneo, registro["matriz_lps"]))
+        escritor.SetFileName(str(ruta_salida))
+        escritor.SetFileTypeToBinary()
+        if not escritor.Write():
+            raise ErrorEntrada(f"no se pudo escribir {ruta_salida}")
+        salida["escaneo_registrado"] = {"ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)}
+    return salida
 
 
 def _medir(args) -> dict:

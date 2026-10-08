@@ -21,6 +21,9 @@ x = -20 a x = 20 mm, centrados en y = 0, z = 0.
 - hueso_009.stl y hueso_010.stl: tubo de hueso simplificado, cilindro vertical
   de z = 0 a z = 20 con centro en y = 0,5 y radio 4,0 o 4,5 (bordes en
   y = -3,5 / 4,5 y y = -4,0 / 5,0). Rodea al implante del caso 001 (R-014).
+- arcada_cbct.stl: cinco "cúspides" esféricas de distintos radios (dientes del CBCT).
+- escaneo_corrido.stl: la misma arcada corrida 0,5 mm en +x, más una lámina de
+  "encía" en z = 4 que no existe en el CBCT (registro, R-015).
 
 Este script NO escribe ningún esperado.json: los resultados esperados los
 calcula y escribe una persona.
@@ -120,6 +123,52 @@ def construir_diente(centro_y: float, z_min: float = 5.0, z_max: float = 25.0,
     return malla
 
 
+# "Cúspides" de la arcada sintética: (centro LPS, radio). Tamaños y posiciones
+# distintos para que ningún desplazamiento ni giro deje la arcada igual.
+CUSPIDES = (((0.0, 0.0, 10.0), 2.0), ((10.0, 0.0, 10.0), 2.5), ((0.0, 10.0, 10.0), 1.5),
+            ((10.0, 10.0, 12.0), 3.0), ((5.0, 18.0, 9.0), 2.2))
+CORRIMIENTO_ESCANEO = (0.5, 0.0, 0.0)
+
+
+def construir_arcada() -> vtk.vtkPolyData:
+    """Dientes del "CBCT": esferas cerradas (cúspides) de distintos radios."""
+    union = vtk.vtkAppendPolyData()
+    for centro, radio in CUSPIDES:
+        esfera = vtk.vtkSphereSource()
+        esfera.SetCenter(*centro)
+        esfera.SetRadius(radio)
+        esfera.SetThetaResolution(48)
+        esfera.SetPhiResolution(48)
+        esfera.Update()
+        union.AddInputData(esfera.GetOutput())
+    limpio = vtk.vtkCleanPolyData()
+    limpio.SetInputConnection(union.GetOutputPort())
+    limpio.Update()
+    return limpio.GetOutput()
+
+
+def construir_escaneo_corrido(arcada: vtk.vtkPolyData) -> vtk.vtkPolyData:
+    """El "escaneo intraoral": la misma arcada corrida 0,5 mm en +x, más una lámina de "encía"
+    (z = 4, lejos de las cúspides) que no existe en el CBCT y que el registro debe descartar."""
+    tr = vtk.vtkTransform()
+    tr.Translate(*CORRIMIENTO_ESCANEO)
+    mover = vtk.vtkTransformPolyDataFilter()
+    mover.SetInputData(arcada)
+    mover.SetTransform(tr)
+    encia = vtk.vtkPlaneSource()
+    encia.SetOrigin(-5.0, -5.0, 4.0)
+    encia.SetPoint1(16.0, -5.0, 4.0)
+    encia.SetPoint2(-5.0, 23.0, 4.0)
+    encia.SetResolution(40, 50)
+    triangulos = vtk.vtkTriangleFilter()
+    triangulos.SetInputConnection(encia.GetOutputPort())
+    union = vtk.vtkAppendPolyData()
+    union.AddInputConnection(mover.GetOutputPort())
+    union.AddInputConnection(triangulos.GetOutputPort())
+    union.Update()
+    return union.GetOutput()
+
+
 def _malla(puntos: np.ndarray, triangulos: np.ndarray) -> vtk.vtkPolyData:
     triangulos = np.asarray(triangulos, dtype=np.int64)
     pd = vtk.vtkPolyData()
@@ -209,6 +258,13 @@ def main() -> None:
     verificar(diente_008, np.pi * RADIO_DIENTE ** 2 * (8.0 + 10.0),
               vertices_exactos=([0.0, 5.0, 5.0], [0.0, 2.5, 15.0]))
     escribir(diente_008, "diente_008.stl")
+
+    print("arcada_cbct.stl / escaneo_corrido.stl")
+    arcada = construir_arcada()
+    verificar(arcada, sum(4 / 3 * np.pi * r ** 3 for _, r in CUSPIDES) * 0.99)
+    escribir(arcada, "arcada_cbct.stl")
+    escaneo = construir_escaneo_corrido(arcada)
+    escribir(escaneo, "escaneo_corrido.stl")
 
     for nombre, radio in (("hueso_009.stl", 4.0), ("hueso_010.stl", 4.5)):
         print(nombre)

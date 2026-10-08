@@ -1,0 +1,7 @@
+{
+  "traslacion_mm": [-0.5, 0, 0],
+  "rotacion_grados": 0,
+  "error_residual_mm": 0,
+  "punto_registrado": [0, 0, 10],
+  "tolerancia_mm": 0.05
+}

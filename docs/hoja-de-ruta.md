@@ -24,7 +24,7 @@ Estado: ✅ hecho · ▶ en curso · ☐ pendiente
 
 Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el escaneo intraoral.
 
-- ☐ Verificar que el escaneo intraoral esté registrado con el CBCT
+- ▶ Registro del escaneo intraoral con el CBCT (R-015): `registrar` implementado con caso dorado 011; falta el caso real y el umbral clínico de aceptación
 - ☐ Región de apoyo sobre los dientes vecinos
 - ☐ Camisa (sleeve) según la especificación del kit
 - ☐ Sobrefresado según el kit en la medición al canal (RP-003, RG-008)

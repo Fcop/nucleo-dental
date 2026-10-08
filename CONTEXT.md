@@ -76,6 +76,16 @@ _Evitar_: alerta, estado, resultado
 Tramo que la fresa avanza más allá del ápice del implante según el kit guiado.
 _Evitar_: sobreperforación, exceso de fresa
 
+## Registro
+
+**Escaneo intraoral**:
+Superficie de dientes y tejido blando tomada con escáner intraoral; es donde se apoya la guía.
+_Evitar_: modelo (a secas), STL del paciente
+
+**Registro**:
+Movimiento rígido (rotación + traslación) que superpone el escaneo intraoral sobre los dientes del CBCT; su error pasa entero a la guía.
+_Evitar_: calce, match, fusión
+
 ## Validación
 
 **Caso dorado**:

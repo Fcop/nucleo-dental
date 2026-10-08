@@ -101,6 +101,24 @@ def test_caso_real_con_implante_stl():
     assert salida["parametros"]["implante"]["largo"] == pytest.approx(8.0, abs=0.01)
 
 
+def test_caso_real_registro_del_escaneo_mejora_el_calce():
+    """Verifica R-015 con datos reales: el refinamiento parte del calce manual en Slicer y lo mejora.
+
+    El 2026-10-08 el calce manual dejaba las coronas a 0,29 mm (mediana) de los
+    dientes del CBCT; el refinamiento las deja a ~0,12 mm y corrige ~0,45 mm en
+    el ápice, con una estabilidad cercana a 0,07 mm entre variantes.
+    """
+    from nucleo_dental.implante import Implante
+    from nucleo_dental.registro import refinar_registro
+
+    apice = Implante.desde_malla(leer_stl(CASO / "implante.stl"), "abajo").apice
+    r = refinar_registro(leer_stl(CASO / "Modelo_inf.stl"), leer_stl(CASO / "Lower Teeth.stl"), punto=apice)
+    assert r["desviacion_despues_mm"]["mediana"] < 0.5 * r["desviacion_antes_mm"]["mediana"]
+    assert r["desviacion_despues_mm"]["p90"] < r["desviacion_antes_mm"]["p90"]
+    assert r["estabilidad_mm"] < 0.1
+    assert r["correccion_en_punto_mm"] > 3 * r["estabilidad_mm"]   # la corrección no es ruido
+
+
 def test_caso_real_largo_declarado_erroneo_se_rechaza():
     """Verifica R-012: el error real del 2026-10-08 (declarar 10 mm para un implante de 8 mm) se detecta."""
     from test_medir import ejecutar
