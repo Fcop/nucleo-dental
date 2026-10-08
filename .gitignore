@@ -5,3 +5,4 @@ __pycache__/
 datos_locales/
 *.dcm
 undercuts/
+tests/casos_prueba/

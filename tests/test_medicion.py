@@ -62,6 +62,43 @@ def test_leer_stl_inexistente_da_error_claro(tmp_path):
         leer_stl(tmp_path / "no_existe.stl")
 
 
+def _stl_con_registros_alterados(tmp_path, nombre, campo, valor, cada=7):
+    """Copia canal_recto.stl alterando `campo` ('normal' o 'v') en uno de cada `cada` triángulos."""
+    import numpy as np
+
+    registro = np.dtype([("normal", "<f4", 3), ("v", "<f4", (3, 3)), ("attr", "<u2")])
+    datos = bytearray(CANAL_RECTO.read_bytes())
+    n = int.from_bytes(datos[80:84], "little")
+    triangulos = np.frombuffer(datos, registro, n, 84).copy()
+    triangulos[campo][::cada] = valor
+    datos[84:] = triangulos.tobytes()
+    destino = tmp_path / nombre
+    destino.write_bytes(bytes(datos))
+    return destino
+
+
+def test_stl_con_normales_no_finitas_se_lee_igual(tmp_path):
+    """Verifica R-004: las normales guardadas en el STL se ignoran; un STL con normales NaN mide igual.
+
+    Caso real: los modelos de mandíbula exportados para el caso de prueba traen
+    ~4 % de normales NaN y el lector de VTK los rechazaba.
+    """
+    canal = leer_stl(_stl_con_registros_alterados(tmp_path, "nan.stl", "normal", float("nan")))
+    original = leer_stl(CANAL_RECTO)
+    assert canal.GetNumberOfPoints() == original.GetNumberOfPoints()
+    assert canal.GetNumberOfCells() == original.GetNumberOfCells()
+    r = medir(_implante_caso_001(), canal)
+    assert r["distancia_mm"] == pytest.approx(2.5, abs=0.05)
+    assert r["semaforo"] == "verde"
+
+
+def test_stl_con_vertices_no_finitos_se_rechaza(tmp_path):
+    """Verifica R-004: un vértice NaN no se puede ignorar sin cambiar la geometría; es error de entrada."""
+    ruta = _stl_con_registros_alterados(tmp_path, "vertice_nan.stl", "v", float("nan"), cada=1000)
+    with pytest.raises(ValueError, match="no finitos"):
+        leer_stl(ruta)
+
+
 def test_canal_abierto_se_rechaza(tmp_path):
     """Verifica R-004: con un canal que no es una superficie cerrada no se puede decidir qué es dentro; se rechaza."""
     import vtk

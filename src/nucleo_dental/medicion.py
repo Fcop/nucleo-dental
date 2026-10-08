@@ -21,17 +21,52 @@ MARGEN_POR_DEFECTO_MM = 2.0
 PASO_MUESTREO_MM = 0.05
 
 
+_REGISTRO_STL = np.dtype([("normal", "<f4", 3), ("v", "<f4", (3, 3)), ("atributo", "<u2")])
+
+
 def leer_stl(ruta) -> vtk.vtkPolyData:
-    """Lee una malla STL en LPS y mm."""
+    """Lee una malla STL en LPS y mm.
+
+    Las normales guardadas en el archivo se ignoran: el núcleo las recalcula.
+    Exportadores reales escriben normales NaN y el lector de VTK aborta con
+    ellas, aunque la geometría esté sana.
+    """
     ruta = Path(ruta)
     if not ruta.is_file():
         raise ValueError(f"No existe el archivo de malla: {ruta}")
-    lector = vtk.vtkSTLReader()
+    datos = ruta.read_bytes()
+    if len(datos) >= 84:
+        n = int.from_bytes(datos[80:84], "little")
+        if n > 0 and len(datos) == 84 + 50 * n:
+            return _malla_desde_stl_binario(np.frombuffer(datos, _REGISTRO_STL, n, 84), ruta)
+
+    lector = vtk.vtkSTLReader()   # STL de texto (ASCII)
     lector.SetFileName(str(ruta))
     lector.Update()
     malla = lector.GetOutput()
     if malla.GetNumberOfPoints() == 0 or malla.GetNumberOfCells() == 0:
         raise ValueError(f"La malla está vacía o no es un STL válido: {ruta}")
+    return malla
+
+
+def _malla_desde_stl_binario(registros: np.ndarray, ruta: Path) -> vtk.vtkPolyData:
+    """Construye la malla con los vértices de cada triángulo, uniendo los vértices repetidos."""
+    vertices = registros["v"].reshape(-1, 3)
+    if not np.all(np.isfinite(vertices)):
+        malos = int((~np.isfinite(registros["v"]).all(axis=(1, 2))).sum())
+        raise ValueError(f"El STL tiene {malos} triángulos con vértices no finitos (NaN o infinito): {ruta}")
+    puntos, indices = np.unique(vertices, axis=0, return_inverse=True)
+    triangulos = indices.reshape(-1, 3).astype(np.int64)
+
+    vtk_puntos = vtk.vtkPoints()
+    vtk_puntos.SetData(numpy_support.numpy_to_vtk(puntos.astype(float), deep=True))
+    offsets = np.arange(0, 3 * len(triangulos) + 1, 3, dtype=np.int64)
+    celdas = vtk.vtkCellArray()
+    celdas.SetData(numpy_support.numpy_to_vtkIdTypeArray(offsets, deep=True),
+                   numpy_support.numpy_to_vtkIdTypeArray(triangulos.ravel(), deep=True))
+    malla = vtk.vtkPolyData()
+    malla.SetPoints(vtk_puntos)
+    malla.SetPolys(celdas)
     return malla
 
 
