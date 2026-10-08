@@ -13,6 +13,10 @@ import numpy as np
 # el redondeo de punto flotante; no es una tolerancia clínica.
 TOLERANCIA_SUPERFICIE_MM = 1e-9
 
+# Desviación de forma admitida al reconocer un cilindro en una malla (facetado,
+# precisión float32 del STL). No es una tolerancia clínica.
+_TOLERANCIA_FORMA_MM = 0.05
+
 
 def _positivo(valor, nombre: str) -> float:
     valor = float(valor)
@@ -41,6 +45,53 @@ class Implante:
         if norma < 1e-12:
             raise ValueError("El eje del implante tiene largo cero; debe indicar una dirección.")
         self.eje = eje / norma
+
+    @classmethod
+    def desde_malla(cls, malla, apice_hacia: str) -> "Implante":
+        """Reconstruye el implante desde la malla de un cilindro (p. ej. el STL planificado en Slicer).
+
+        Un cilindro es simétrico: la malla no dice cuál extremo es el ápice.
+        `apice_hacia` lo decide en el eje z de LPS: "abajo" (ápice inferior,
+        mandíbula) o "arriba" (ápice superior, maxilar). Se rechaza un
+        implante a más de 60° de la vertical y una malla que no sea un cilindro.
+        """
+        from vtk.util import numpy_support
+
+        if apice_hacia not in ("abajo", "arriba"):
+            raise ValueError(f"apice_hacia debe ser 'abajo' o 'arriba' (se recibió '{apice_hacia}').")
+        p = numpy_support.vtk_to_numpy(malla.GetPoints().GetData()).astype(float)
+        if len(p) < 6:
+            raise ValueError("La malla del implante tiene muy pocos vértices para ser un cilindro.")
+
+        centro = p.mean(axis=0)
+        eje = np.linalg.svd(p - centro, full_matrices=False)[2][0]
+        t = (p - centro) @ eje
+        r = np.linalg.norm((p - centro) - np.outer(t, eje), axis=1)
+        t_min, t_max = t.min(), t.max()
+
+        en_min = np.abs(t - t_min) <= _TOLERANCIA_FORMA_MM
+        en_max = np.abs(t - t_max) <= _TOLERANCIA_FORMA_MM
+        lado = ~(en_min | en_max)
+        radio = r[lado].mean() if lado.any() else r[r >= r.max() - _TOLERANCIA_FORMA_MM].mean()
+        es_cilindro = (
+            np.all(np.abs(r[lado] - radio) <= _TOLERANCIA_FORMA_MM)
+            and r.max() <= radio + _TOLERANCIA_FORMA_MM
+            and r[en_min].max() >= radio - _TOLERANCIA_FORMA_MM
+            and r[en_max].max() >= radio - _TOLERANCIA_FORMA_MM
+        )
+        if not es_cilindro:
+            raise ValueError("La malla del implante no es un cilindro (radio no constante o extremos sin borde "
+                             "circular). Por ahora el núcleo solo modela implantes cilíndricos (R-003).")
+
+        if abs(eje[2]) < np.cos(np.radians(60)):
+            angulo = np.degrees(np.arccos(abs(eje[2])))
+            raise ValueError(f"El implante está a {angulo:.0f}° de la vertical (más de 60°): "
+                             "'abajo' o 'arriba' no definen el ápice con seguridad.")
+
+        extremos = (centro + t_min * eje, centro + t_max * eje)
+        inferior, superior = sorted(extremos, key=lambda e: e[2])
+        apice, plataforma = (inferior, superior) if apice_hacia == "abajo" else (superior, inferior)
+        return cls(diametro=2 * radio, largo=t_max - t_min, apice=apice, eje=plataforma - apice)
 
     @property
     def plataforma(self) -> np.ndarray:

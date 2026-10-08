@@ -107,6 +107,86 @@ def test_coordenadas_negativas(forma):
     assert codigo == 2
 
 
+def _escribir_implante_stl(ruta: Path, diametro=4.1, largo=10.0, apice=(0, 0, 4.0), eje=(0, 0, 1)) -> Path:
+    import vtk
+
+    from nucleo_dental.implante import Implante
+
+    escritor = vtk.vtkSTLWriter()
+    escritor.SetInputData(Implante(diametro, largo, list(apice), list(eje)).como_malla())
+    escritor.SetFileName(str(ruta))
+    escritor.SetFileTypeToBinary()
+    escritor.Write()
+    return ruta
+
+
+def test_implante_stl_equivale_a_parametros(tmp_path):
+    """Verifica R-012 y R-007: el implante del caso 001 leído desde su STL da 2,5 mm y verde, y el STL queda trazado."""
+    stl = _escribir_implante_stl(tmp_path / "implante.stl")
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--implante-stl", stl, "--apice-hacia", "abajo")
+    assert salida is not None, stderr
+    assert salida["resultado"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
+    assert codigo == 0
+
+    imp = salida["parametros"]["implante"]
+    assert imp["stl"] == str(stl)
+    assert imp["apice_hacia"] == "abajo"
+    assert imp["diametro"] == pytest.approx(4.1, abs=1e-4)
+    assert imp["largo"] == pytest.approx(10.0, abs=1e-4)
+    assert imp["apice"] == pytest.approx([0, 0, 4.0], abs=1e-4)
+    rutas = {Path(a["ruta"]).resolve(): a["sha256"] for a in salida["trazabilidad"]["archivos_entrada"]}
+    assert rutas[stl.resolve()] == _sha256(stl)
+
+
+def test_implante_stl_contrasta_medidas_declaradas(tmp_path):
+    """Verifica R-012: medidas declaradas que difieren del STL en más de 0,1 mm son error de entrada (1).
+
+    Reproduce el error del caso real: se declaró largo 10 para un implante de 8 mm.
+    """
+    stl = _escribir_implante_stl(tmp_path / "implante8.stl", diametro=4.0, largo=8.0)
+    base = ["medir", "--canal", CANAL_RECTO, "--implante-stl", stl, "--apice-hacia", "abajo"]
+
+    codigo, _, stderr = ejecutar(*base, "--diametro", 4.0, "--largo", 10)
+    assert codigo == 1
+    assert "largo" in stderr and "10" in stderr and "8.0" in stderr
+
+    codigo, salida, stderr = ejecutar(*base, "--diametro", 4.05, "--largo", 8.08)
+    assert salida is not None, stderr
+    assert codigo in (0, 2)
+
+
+def test_implante_stl_desde_caso_json(tmp_path):
+    """Verifica R-012: caso.json acepta {"stl", "apice_hacia"} con ruta relativa al caso."""
+    _escribir_implante_stl(tmp_path / "implante.stl")
+    caso = tmp_path / "caso.json"
+    caso.write_text(json.dumps({"canal": str(CANAL_RECTO),
+                                "implante": {"stl": "implante.stl", "apice_hacia": "abajo"},
+                                "margen": 2.0}), encoding="utf-8")
+    codigo, salida, stderr = ejecutar("medir", "--caso", caso)
+    assert salida is not None, stderr
+    assert salida["resultado"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
+    assert codigo == 0
+
+
+@pytest.mark.parametrize(
+    "extra, texto",
+    [(["--implante-stl", "IMPLANTE", "--apice", "0,0,4"], "no se combina"),
+     (["--implante-stl", "IMPLANTE"], "--apice-hacia"),
+     (["--implante-stl", "IMPLANTE", "--apice-hacia", "izquierda"], "abajo"),
+     (["--apice-hacia", "abajo", "--diametro", "4.1", "--largo", "10", "--apice", "0,0,4", "--eje", "0,0,1"],
+      "--implante-stl")],
+    ids=["stl_mas_apice", "falta_apice_hacia", "apice_hacia_invalido", "apice_hacia_sin_stl"],
+)
+def test_implante_stl_errores_de_entrada(tmp_path, extra, texto):
+    """Verifica R-008 y R-012: combinaciones inválidas con --implante-stl devuelven 1 con mensaje claro."""
+    stl = str(_escribir_implante_stl(tmp_path / "implante.stl"))
+    argumentos = [stl if a == "IMPLANTE" else a for a in extra]
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, *argumentos)
+    assert codigo == 1
+    assert salida is None
+    assert texto in stderr
+
+
 def test_codigos_salida():
     """Verifica R-008: 0 = verde, 2 = rojo."""
     assert ejecutar("medir", "--caso", CASOS_DORADOS / "caso_001" / "caso.json")[0] == 0

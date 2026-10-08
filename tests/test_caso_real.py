@@ -79,6 +79,33 @@ def test_caso_real_contra_medicion_manual():
     assert salida["cbct"]["tamano"] == [601, 601, 601]
 
 
+@pytest.mark.skipif(not (CASO / "esperado.json").is_file(), reason="sin medición manual de referencia")
+def test_caso_real_con_implante_stl():
+    """Verifica R-011 y R-012: leyendo el implante desde su STL se reproduce la medición manual (2,330 mm)."""
+    from test_medir import ejecutar
+
+    esperado = json.loads((CASO / "esperado.json").read_text(encoding="utf-8"))
+    codigo, salida, stderr = ejecutar(
+        "medir", "--canal", CASO / "Mandibular canal.stl", "--implante-stl", CASO / "implante.stl",
+        "--apice-hacia", "abajo", "--diametro", "4", "--largo", "8", "--cbct", CASO / "DICOM")
+    assert salida is not None, stderr
+    assert salida["resultado"]["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=esperado["tolerancia_mm"])
+    assert codigo == esperado["codigo_salida"]
+    assert salida["parametros"]["implante"]["largo"] == pytest.approx(8.0, abs=0.01)
+
+
+def test_caso_real_largo_declarado_erroneo_se_rechaza():
+    """Verifica R-012: el error real del 2026-10-08 (declarar 10 mm para un implante de 8 mm) se detecta."""
+    from test_medir import ejecutar
+
+    codigo, salida, stderr = ejecutar(
+        "medir", "--canal", CASO / "Mandibular canal.stl", "--implante-stl", CASO / "implante.stl",
+        "--apice-hacia", "abajo", "--diametro", "4", "--largo", "10")
+    assert codigo == 1
+    assert salida is None
+    assert "largo" in stderr
+
+
 @pytest.mark.parametrize("modelo", MODELOS, ids=lambda p: p.name)
 def test_modelo_real_en_lps_cae_dentro_y_en_ras_fuera(volumen, modelo):
     """Verifica R-010 con datos reales: el modelo en LPS está dentro del CBCT; su versión RAS, fuera."""

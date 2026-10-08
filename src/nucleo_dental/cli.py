@@ -28,7 +28,11 @@ CODIGO_VERDE = 0
 CODIGO_ERROR_ENTRADA = 1
 CODIGO_ROJO = 2
 
-PARAMETROS_SUELTOS = ("canal", "diametro", "largo", "apice", "eje", "margen")
+PARAMETROS_SUELTOS = ("canal", "diametro", "largo", "apice", "eje", "implante_stl", "apice_hacia", "margen")
+
+# Diferencia admitida entre las medidas declaradas y las del STL del implante
+# (R-012, decisión clínica 2026-10-08).
+TOLERANCIA_MEDIDAS_IMPLANTE_MM = 0.1
 
 
 class ErrorEntrada(Exception):
@@ -85,6 +89,10 @@ def _crear_parser() -> argparse.ArgumentParser:
     m.add_argument("--largo", help="Largo del implante en mm.")
     m.add_argument("--apice", help="Ápice x,y,z en LPS y mm.")
     m.add_argument("--eje", help="Eje dx,dy,dz del ápice a la plataforma.")
+    m.add_argument("--implante-stl", help="STL del implante planificado (cilindro, LPS): reemplaza --apice y --eje; "
+                                          "--diametro y --largo, si se indican, se contrastan con el STL.")
+    m.add_argument("--apice-hacia", help="Con --implante-stl: 'abajo' (ápice inferior, mandíbula) o 'arriba' "
+                                         "(ápice superior, maxilar).")
     m.add_argument("--margen", help=f"Margen en mm (por defecto {MARGEN_POR_DEFECTO_MM}).")
     m.add_argument("--cbct", help="Carpeta con la serie DICOM del CBCT: verifica que canal e implante "
                                   "caigan dentro del volumen (detecta RAS/LPS mezclados). Requiere SimpleITK.")
@@ -95,31 +103,30 @@ def _medir(args) -> dict:
     sueltos = [n for n in PARAMETROS_SUELTOS if getattr(args, n) is not None]
     if args.caso is not None:
         if sueltos:
-            raise ErrorEntrada("--caso no se combina con parámetros sueltos (" + ", ".join(f"--{n}" for n in sueltos) + ")")
+            raise ErrorEntrada("--caso no se combina con parámetros sueltos ("
+                               + ", ".join(f"--{n.replace('_', '-')}" for n in sueltos) + ")")
         ruta_caso = Path(args.caso)
         caso = _leer_caso(ruta_caso)
         ruta_canal = (ruta_caso.parent / caso["canal"])
-        implante_dict = caso["implante"]
+        especificacion = dict(caso["implante"])
+        if "stl" in especificacion:
+            especificacion["stl"] = str(ruta_caso.parent / especificacion["stl"])
         margen = caso["margen"]
         archivos = [ruta_caso, ruta_canal]
     else:
         if not sueltos:
-            raise ErrorEntrada("indica --caso ruta/caso.json o los parámetros sueltos (--canal, --diametro, --largo, --apice, --eje)")
-        faltan = [f"--{n}" for n in PARAMETROS_SUELTOS[:-1] if getattr(args, n) is None]
-        if faltan:
-            raise ErrorEntrada("faltan parámetros: " + ", ".join(faltan))
+            raise ErrorEntrada("indica --caso ruta/caso.json o los parámetros sueltos (--canal y el implante: "
+                               "--diametro --largo --apice --eje, o --implante-stl --apice-hacia)")
+        especificacion = _implante_desde_argumentos(args)
+        if args.canal is None:
+            raise ErrorEntrada("faltan parámetros: --canal")
         ruta_canal = Path(args.canal)
-        implante_dict = {
-            "diametro": _numero(args.diametro, "--diametro"),
-            "largo": _numero(args.largo, "--largo"),
-            "apice": _vector(args.apice, "--apice"),
-            "eje": _vector(args.eje, "--eje"),
-        }
         margen = MARGEN_POR_DEFECTO_MM if args.margen is None else _numero(args.margen, "--margen")
         archivos = [ruta_canal]
 
-    implante = Implante(implante_dict["diametro"], implante_dict["largo"],
-                        implante_dict["apice"], implante_dict["eje"])
+    implante, implante_dict = _construir_implante(especificacion)
+    if "stl" in implante_dict:
+        archivos.append(Path(implante_dict["stl"]))
     canal = leer_stl(ruta_canal)
 
     cbct = None
@@ -149,6 +156,59 @@ def _medir(args) -> dict:
     return salida
 
 
+def _implante_desde_argumentos(args) -> dict:
+    """Especificación del implante a partir de los parámetros sueltos de la línea de comandos."""
+    if args.implante_stl is None and args.apice_hacia is None:
+        faltan = [f"--{n}" for n in ("canal", "diametro", "largo", "apice", "eje") if getattr(args, n) is None]
+        if faltan:
+            raise ErrorEntrada("faltan parámetros: " + ", ".join(faltan))
+        return {"diametro": _numero(args.diametro, "--diametro"), "largo": _numero(args.largo, "--largo"),
+                "apice": _vector(args.apice, "--apice"), "eje": _vector(args.eje, "--eje")}
+
+    if args.implante_stl is None:
+        raise ErrorEntrada("--apice-hacia solo se usa junto con --implante-stl")
+    mezclados = [f"--{n}" for n in ("apice", "eje") if getattr(args, n) is not None]
+    if mezclados:
+        raise ErrorEntrada("--implante-stl no se combina con " + ", ".join(mezclados)
+                           + ": la posición y el eje salen del STL")
+    if args.apice_hacia is None:
+        raise ErrorEntrada("falta --apice-hacia (abajo o arriba): el STL de un cilindro no dice cuál extremo es el ápice")
+    especificacion = {"stl": args.implante_stl, "apice_hacia": args.apice_hacia}
+    for nombre in ("diametro", "largo"):
+        if getattr(args, nombre) is not None:
+            especificacion[nombre] = _numero(getattr(args, nombre), f"--{nombre}")
+    return especificacion
+
+
+def _construir_implante(especificacion: dict) -> tuple[Implante, dict]:
+    """Implante y su descripción para la salida, desde parámetros o desde un STL (R-012)."""
+    if "stl" not in especificacion:
+        implante = Implante(especificacion["diametro"], especificacion["largo"],
+                            especificacion["apice"], especificacion["eje"])
+        return implante, especificacion
+
+    if "apice_hacia" not in especificacion:
+        raise ErrorEntrada("al implante desde STL le falta 'apice_hacia' (abajo o arriba)")
+    implante = Implante.desde_malla(leer_stl(especificacion["stl"]), especificacion["apice_hacia"])
+    descripcion = {
+        "stl": especificacion["stl"],
+        "apice_hacia": especificacion["apice_hacia"],
+        "diametro": implante.diametro,
+        "largo": implante.largo,
+        "apice": implante.apice.tolist(),
+        "eje": implante.eje.tolist(),
+    }
+    for nombre, medido in (("diametro", implante.diametro), ("largo", implante.largo)):
+        if nombre in especificacion:
+            declarado = float(especificacion[nombre])
+            descripcion[f"{nombre}_declarado"] = declarado
+            if abs(declarado - medido) > TOLERANCIA_MEDIDAS_IMPLANTE_MM:
+                raise ErrorEntrada(
+                    f"el {nombre} declarado ({declarado} mm) difiere del medido en el STL ({medido:.3f} mm) "
+                    f"en más de {TOLERANCIA_MEDIDAS_IMPLANTE_MM} mm; revisa el implante elegido o el STL")
+    return implante, descripcion
+
+
 def _leer_caso(ruta: Path) -> dict:
     if not ruta.is_file():
         raise ErrorEntrada(f"No existe el archivo de caso: {ruta}")
@@ -159,7 +219,8 @@ def _leer_caso(ruta: Path) -> dict:
     faltan = [c for c in ("canal", "implante", "margen") if c not in caso]
     if faltan:
         raise ErrorEntrada(f"{ruta} no tiene los campos: {', '.join(faltan)}")
-    faltan = [c for c in ("diametro", "largo", "apice", "eje") if c not in caso["implante"]]
+    requeridos = ("stl", "apice_hacia") if "stl" in caso["implante"] else ("diametro", "largo", "apice", "eje")
+    faltan = [c for c in requeridos if c not in caso["implante"]]
     if faltan:
         raise ErrorEntrada(f"{ruta}: al implante le faltan los campos: {', '.join(faltan)}")
     return caso

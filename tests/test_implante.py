@@ -163,6 +163,59 @@ def test_como_malla_sigue_el_eje(eje):
     assert t.max() == pytest.approx(10.0, abs=1e-9)
 
 
+@pytest.mark.parametrize(
+    "apice, eje, apice_hacia",
+    [([0, 0, 4.0], [0, 0, 1], "abajo"),          # caso 001: mandíbula, ápice inferior
+     ([1, 2, 3], [0, 0, -1], "arriba"),          # maxilar: ápice superior, eje hacia abajo
+     ([1, 2, 3], [0.3, 0.2, 1.0], "abajo")],     # inclinado ~20°
+    ids=["mandibula", "maxilar", "inclinado"],
+)
+def test_desde_malla_reconstruye_el_implante(apice, eje, apice_hacia):
+    """Verifica R-012: desde la malla de un cilindro se recuperan diámetro, largo, ápice y eje."""
+    original = Implante(diametro=4.1, largo=10.0, apice=apice, eje=eje)
+    reconstruido = Implante.desde_malla(original.como_malla(), apice_hacia=apice_hacia)
+    assert reconstruido.diametro == pytest.approx(4.1, abs=1e-6)
+    assert reconstruido.largo == pytest.approx(10.0, abs=1e-6)
+    np.testing.assert_allclose(reconstruido.apice, original.apice, atol=1e-6)
+    np.testing.assert_allclose(reconstruido.eje, original.eje, atol=1e-6)
+
+
+def test_desde_malla_apice_hacia_decide_el_extremo():
+    """Verifica R-003 y R-012: el mismo cilindro con 'arriba' en vez de 'abajo' invierte ápice y plataforma."""
+    malla = Implante(diametro=4.1, largo=10.0, apice=[0, 0, 4.0], eje=[0, 0, 1]).como_malla()
+    invertido = Implante.desde_malla(malla, apice_hacia="arriba")
+    np.testing.assert_allclose(invertido.apice, [0, 0, 14.0], atol=1e-6)
+    np.testing.assert_allclose(invertido.eje, [0, 0, -1], atol=1e-6)
+
+
+def test_desde_malla_rechaza_implante_casi_horizontal():
+    """Verifica R-012: a más de 60° de la vertical, 'abajo' o 'arriba' no definen el ápice; se rechaza."""
+    malla = Implante(diametro=4.1, largo=10.0, apice=[0, 0, 0], eje=[1, 0, 0.5]).como_malla()  # ~63°
+    with pytest.raises(ValueError, match="60"):
+        Implante.desde_malla(malla, apice_hacia="abajo")
+
+
+def test_desde_malla_rechaza_valor_desconocido_de_apice_hacia():
+    """Verifica R-012: apice_hacia solo acepta 'abajo' o 'arriba'."""
+    malla = implante_referencia().como_malla()
+    with pytest.raises(ValueError, match="abajo"):
+        Implante.desde_malla(malla, apice_hacia="izquierda")
+
+
+def test_desde_malla_rechaza_lo_que_no_es_cilindro():
+    """Verifica R-012: una malla que no es un cilindro (aquí, un cono) se rechaza."""
+    import vtk
+
+    cono = vtk.vtkConeSource()
+    cono.SetResolution(64)
+    cono.SetHeight(10)
+    cono.SetRadius(2)
+    cono.SetDirection(0, 0, 1)
+    cono.Update()
+    with pytest.raises(ValueError, match="cilindro"):
+        Implante.desde_malla(cono.GetOutput(), apice_hacia="abajo")
+
+
 def test_eje_se_normaliza():
     """Verifica R-003: un eje no unitario se normaliza; (0, 0, 2) equivale a (0, 0, 1)."""
     imp = Implante(diametro=4.1, largo=10.0, apice=[0, 0, 0], eje=[0, 0, 2])
