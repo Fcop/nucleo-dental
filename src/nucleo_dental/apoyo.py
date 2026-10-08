@@ -19,6 +19,7 @@ from vtk.util import numpy_support
 
 from nucleo_dental.geometria.malla_guia import ARRAY_REGION, extraer_parche
 
+RADIO_APOYO_POR_DEFECTO_MM = 24.0   # cubre ~2 dientes por lado con la mayor superficie (decisión clínica 2026-10-08)
 UMBRAL_DIENTE_MM = 0.5          # cubre el residuo del registro (p90 ≈ 0,31 mm en el caso real)
 ANGULO_MAXIMO_GRADOS = 45.0     # orientación del escaneo frente a la superficie dental del CBCT
 _DESPLAZAMIENTO_MM = 0.3        # se evalúa la orientación a esta distancia, fuera de la superficie
@@ -62,7 +63,7 @@ def clasificar_diente_encia(escaneo: vtk.vtkPolyData, dientes: vtk.vtkPolyData,
 
 
 def region_automatica(escaneo: vtk.vtkPolyData, dientes: vtk.vtkPolyData, punto_eje, direccion_eje,
-                      radio_mm: float = 20.0, margen_encia_mm: float = 1.0) -> dict:
+                      radio_mm: float = RADIO_APOYO_POR_DEFECTO_MM, margen_encia_mm: float = 1.0) -> dict:
     """Región de apoyo propuesta automáticamente.
 
     Superficie dental del escaneo a menos de `radio_mm` del eje del implante

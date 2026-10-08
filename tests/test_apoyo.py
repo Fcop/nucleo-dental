@@ -79,6 +79,13 @@ def test_encia_pegada_al_diente_no_se_confunde_con_diente():
     assert es_diente[pared].all()
 
 
+def test_radio_por_defecto_es_24_mm():
+    """Verifica R-016: el radio por defecto del modo automático es 24 mm (decisión clínica 2026-10-08)."""
+    from nucleo_dental.apoyo import RADIO_APOYO_POR_DEFECTO_MM
+
+    assert RADIO_APOYO_POR_DEFECTO_MM == 24.0
+
+
 def test_radio_y_margen_configurables():
     """Verifica R-016: con R = 28 entra el diente 3; con margen de encía 2 mm el apoyo empieza en z = 2."""
     caso, _, escaneo, dientes = _cargar_012()
