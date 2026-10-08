@@ -169,6 +169,9 @@ def espesor_oseo(implante: Implante, malla_hueso: vtk.vtkPolyData, margen: float
     if not np.isfinite(margen) or margen < 0:
         raise ValueError(f"El margen debe ser un número mayor o igual que 0 mm (se recibió {margen}).")
     _exigir_superficie_cerrada(malla_hueso)
+    # Las cavidades internas (rodeadas de hueso) no cuentan para el espesor;
+    # solo se informan si el implante las toca (decisión clínica 2026-10-08).
+    malla_hueso, cavidades = _separar_cavidades(malla_hueso)
 
     e1, e2 = implante._base_perpendicular()
     n_direcciones = 4 * int(np.ceil(2 * np.pi * implante.radio / (4 * _PASO_RAYOS_MM)))
@@ -202,15 +205,101 @@ def espesor_oseo(implante: Implante, malla_hueso: vtk.vtkPolyData, margen: float
         n_dentro = np.cumprod(dentro_fino, axis=1).sum(axis=1)
         espesor[refinar] = base + n_dentro * _PASO_FINO_MM
 
-    i = int(np.argmin(espesor))
-    minimo = float(espesor[i])
+    # 3) Exposición: cuánto sobresale fuera del hueso la pared que no está dentro.
+    pared_fuera = ~dentro[:, 0]
+    exposicion = np.zeros(len(origen))
+    if pared_fuera.any():
+        exposicion[pared_fuera] = np.abs(_distancia_sin_signo(malla_hueso, origen[pared_fuera]))
+
+    # Punto crítico: la mayor exposición o, si no la hay, el menor espesor.
+    i = int(np.argmax(exposicion)) if pared_fuera.any() else int(np.argmin(espesor))
+    minimo = float(espesor.min())
     return {
         "espesor_minimo_mm": minimo,
+        "exposicion_maxima_mm": float(exposicion.max()),
         "margen_mm": margen,
         "semaforo": "verde" if minimo >= margen else "rojo",
-        "direccion_minimo": [float(v) for v in direccion[i]],
-        "altura_minimo_sobre_apice_mm": float(altura[i]),
+        "direccion_critica": [float(v) for v in direccion[i]],
+        "altura_critica_sobre_apice_mm": float(altura[i]),
+        "cavidades_en_contacto": _cavidades_en_contacto(implante, cavidades),
     }
+
+
+def _distancia_sin_signo(malla: vtk.vtkPolyData, puntos: np.ndarray) -> np.ndarray:
+    implicita = vtk.vtkImplicitPolyDataDistance()
+    implicita.SetInput(malla)
+    entrada = numpy_support.numpy_to_vtk(np.ascontiguousarray(puntos, dtype=float), deep=True)
+    salida = vtk.vtkDoubleArray()
+    implicita.FunctionValue(entrada, salida)
+    return np.abs(numpy_support.vtk_to_numpy(salida))
+
+
+def _componentes(malla: vtk.vtkPolyData) -> list:
+    """Partes conectadas de la malla, cada una como vtkPolyData independiente."""
+    conectividad = vtk.vtkPolyDataConnectivityFilter()
+    conectividad.SetInputData(malla)
+    conectividad.SetExtractionModeToAllRegions()
+    conectividad.Update()
+    partes = []
+    for region in range(conectividad.GetNumberOfExtractedRegions()):
+        una = vtk.vtkPolyDataConnectivityFilter()
+        una.SetInputData(malla)
+        una.SetExtractionModeToSpecifiedRegions()
+        una.AddSpecifiedRegion(region)
+        limpia = vtk.vtkCleanPolyData()
+        limpia.SetInputConnection(una.GetOutputPort())
+        limpia.Update()
+        parte = vtk.vtkPolyData()
+        parte.DeepCopy(limpia.GetOutput())
+        partes.append(parte)
+    return partes
+
+
+def _separar_cavidades(malla: vtk.vtkPolyData):
+    """(sólido sin cavidades, [cavidades]) de una malla cerrada.
+
+    Una parte es cavidad si está encerrada por un número impar de otras
+    partes (hueso → cavidad; hueso → cavidad → isla ósea vuelve a ser sólido).
+    Quitar sus superficies rellena la cavidad.
+    """
+    partes = _componentes(malla)
+    if len(partes) == 1:
+        return malla, []
+    cajas = [np.array(p.GetBounds()).reshape(3, 2) for p in partes]
+    muestra = [numpy_support.vtk_to_numpy(p.GetPoints().GetData())[0] for p in partes]
+    encierros = np.zeros(len(partes), dtype=int)
+    for j, contenedora in enumerate(partes):
+        candidatas = [i for i in range(len(partes)) if i != j
+                      and np.all(cajas[i][:, 0] >= cajas[j][:, 0]) and np.all(cajas[i][:, 1] <= cajas[j][:, 1])]
+        if candidatas:
+            encierros[candidatas] += _dentro(contenedora, np.array([muestra[i] for i in candidatas]))
+    es_cavidad = encierros % 2 == 1
+    if not es_cavidad.any():
+        return malla, []
+
+    solido = vtk.vtkAppendPolyData()
+    for parte, cavidad in zip(partes, es_cavidad):
+        if not cavidad:
+            solido.AddInputData(parte)
+    solido.Update()
+    resultado = vtk.vtkPolyData()
+    resultado.DeepCopy(solido.GetOutput())
+    return resultado, [p for p, c in zip(partes, es_cavidad) if c]
+
+
+def _cavidades_en_contacto(implante: Implante, cavidades: list) -> list:
+    """Cavidades que el implante toca: algún vértice dentro del implante o alguna pared del implante dentro de ellas."""
+    contacto = []
+    superficie = implante.puntos_superficie(_PASO_RAYOS_MM)
+    for cavidad in cavidades:
+        vertices = numpy_support.vtk_to_numpy(cavidad.GetPoints().GetData())
+        if implante.contiene(vertices).any() or _dentro(cavidad, superficie).any():
+            masa = vtk.vtkMassProperties()
+            masa.SetInputData(cavidad)
+            masa.Update()
+            contacto.append({"volumen_mm3": float(abs(masa.GetVolume())),
+                             "centro": [float(v) for v in vertices.mean(axis=0)]})
+    return contacto
 
 
 def evaluar_plan(implante: Implante, estructuras: dict) -> dict:

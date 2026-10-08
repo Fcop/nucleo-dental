@@ -71,7 +71,9 @@ def test_caso_real_contra_medicion_manual():
     Implante planificado en 3D Slicer (D 4 mm, L 8 mm, inclinado ~10°) sobre el
     canal derecho. Referencias medidas a mano: canal 2,330 mm desde el borde
     anterior del ápice (desde el centro daba 2,733); dientes 7,529 mm al
-    premolar bajo la plataforma (a la corona del molar daba 5,95-6,43).
+    premolar bajo la plataforma (a la corona del molar daba 5,95-6,43); hueso:
+    la pared vestibular sobresale 0,216 mm a nivel de la plataforma (rojo).
+    La cavidad interna mesial de ~2,6 mm³ se informa sin dar rojo.
     """
     from test_medir import ejecutar
 
@@ -79,6 +81,10 @@ def test_caso_real_contra_medicion_manual():
     assert salida is not None, stderr
     _comparar_con_medicion_manual(salida, codigo)
     assert salida["cbct"]["tamano"] == [601, 601, 601]
+    hueso = salida["resultado"]["estructuras"]["hueso"]
+    assert hueso["altura_critica_sobre_apice_mm"] == pytest.approx(8.0, abs=0.3)       # en la plataforma
+    assert hueso["direccion_critica"][0] < -0.9                                        # -x: vestibular (lado derecho)
+    assert [round(c["volumen_mm3"]) for c in hueso["cavidades_en_contacto"]] == [3]    # cavidad mesial informada
 
 
 @pytest.mark.skipif(not (CASO / "esperado.json").is_file(), reason="sin medición manual de referencia")
@@ -88,7 +94,7 @@ def test_caso_real_con_implante_stl():
 
     codigo, salida, stderr = ejecutar(
         "medir", "--canal", CASO / "Mandibular canal.stl", "--dientes", CASO / "Lower Teeth.stl",
-        "--implante-stl", CASO / "implante.stl", "--apice-hacia", "abajo", "--diametro", "4", "--largo", "8",
+        "--hueso", CASO / "Mandible.stl", "--implante-stl", CASO / "implante.stl", "--apice-hacia", "abajo", "--diametro", "4", "--largo", "8",
         "--cbct", CASO / "DICOM")
     assert salida is not None, stderr
     _comparar_con_medicion_manual(salida, codigo)

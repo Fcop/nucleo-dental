@@ -38,6 +38,14 @@ _Evitar_: tejido óseo (como estructura), reborde
 Hueso que queda entre la pared lateral del implante y la superficie externa del hueso, medido perpendicular al eje; el mínimo alrededor del implante se compara con el margen de hueso. Bajo el ápice no se mide.
 _Evitar_: tabla ósea (como término de software), ancho de hueso, distancia al hueso
 
+**Exposición**:
+Cuánto sobresale fuera del hueso la pared lateral del implante (dehiscencia o fenestración); el espesor óseo ahí es 0.
+_Evitar_: espesor negativo, perforación (cuando se habla de la medida)
+
+**Cavidad interna**:
+Espacio sin hueso segmentado y rodeado de hueso por todos lados (p. ej. un espacio medular); no reduce el espesor óseo, pero se informa si el implante la toca.
+_Evitar_: hueco, defecto (sin precisar)
+
 **Estructura**:
 Cada anatomía contra la que se evalúa el implante (canal mandibular, dientes), con su propio margen.
 _Evitar_: objeto, órgano, malla (cuando se habla del concepto clínico)

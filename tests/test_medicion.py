@@ -6,6 +6,7 @@ valores calculados a mano por Francisco. Este archivo nunca los modifica.
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dorados import CARPETAS_DORADAS, CASOS_DORADOS, comparar, leer_caso, leer_esperado
@@ -66,13 +67,64 @@ def test_bajo_el_apice_no_cuenta():
     assert r["semaforo"] == "verde"
 
 
-def test_espesor_informa_donde_esta_el_minimo():
+def test_espesor_informa_el_punto_critico():
     """Verifica R-014: la salida indica la dirección (LPS) y la altura sobre el ápice del espesor mínimo (caso 009: hacia -y)."""
     implante, estructuras, _ = _cargar_caso(CASOS_DORADOS / "caso_009_hueso_rojo")
     malla, margen = estructuras["hueso"]
     r = espesor_oseo(implante, malla, margen)
-    assert r["direccion_minimo"] == pytest.approx([0, -1, 0], abs=1e-6)
-    assert 0.0 <= r["altura_minimo_sobre_apice_mm"] <= 10.0
+    assert r["direccion_critica"] == pytest.approx([0, -1, 0], abs=1e-6)
+    assert 0.0 <= r["altura_critica_sobre_apice_mm"] <= 10.0
+    assert r["exposicion_maxima_mm"] == 0.0
+    assert r["cavidades_en_contacto"] == []
+
+
+def test_exposicion_de_la_pared_fuera_del_hueso():
+    """Verifica R-014: si la pared sale del hueso se informa cuánto sobresale, sin espesores negativos.
+
+    Hueso 010 (borde -y en y = -4,0); implante con eje en y = -2,5: su pared -y queda en -4,55, sobresale 0,55 mm.
+    """
+    implante = Implante(diametro=4.1, largo=10.0, apice=[0, -2.5, 4.0], eje=[0, 0, 1])
+    r = espesor_oseo(implante, leer_stl(CASOS_DORADOS / "hueso_010.stl"), 1.5)
+    assert r["espesor_minimo_mm"] == 0.0
+    assert r["exposicion_maxima_mm"] == pytest.approx(0.55, abs=0.05)
+    assert r["direccion_critica"] == pytest.approx([0, -1, 0], abs=1e-6)
+    assert r["semaforo"] == "rojo"
+
+
+def _hueso_con_cavidad():
+    """Hueso 010 con una cavidad interna cilíndrica (radio 0,5, centro y = -2,3, z de 8 a 9) que corta la pared -y del implante."""
+    import vtk
+
+    cavidad = Implante(diametro=1.0, largo=1.0, apice=[0, -2.3, 8.0], eje=[0, 0, 1]).como_malla(lados=32)
+    union = vtk.vtkAppendPolyData()
+    union.AddInputData(leer_stl(CASOS_DORADOS / "hueso_010.stl"))
+    union.AddInputData(cavidad)
+    union.Update()
+    return union.GetOutput()
+
+
+def test_cavidad_interna_no_cuenta_pero_se_avisa():
+    """Verifica R-014: una cavidad rodeada de hueso no reduce el espesor (sigue 1,95, verde) y se informa su volumen."""
+    implante = Implante(diametro=4.1, largo=10.0, apice=[0, 0, 4.0], eje=[0, 0, 1])
+    r = espesor_oseo(implante, _hueso_con_cavidad(), 1.5)
+    assert r["espesor_minimo_mm"] == pytest.approx(1.95, abs=0.05)
+    assert r["semaforo"] == "verde"
+    assert len(r["cavidades_en_contacto"]) == 1
+    assert r["cavidades_en_contacto"][0]["volumen_mm3"] == pytest.approx(np.pi * 0.25 * 1.0, rel=0.02)
+
+
+def test_cavidad_lejos_del_implante_no_se_informa():
+    """Verifica R-014: una cavidad interna que no toca el implante no aparece en el aviso."""
+    import vtk
+
+    lejana = Implante(diametro=1.0, largo=1.0, apice=[0, 3.5, 15.0], eje=[0, 0, 1]).como_malla(lados=32)
+    union = vtk.vtkAppendPolyData()
+    union.AddInputData(leer_stl(CASOS_DORADOS / "hueso_010.stl"))
+    union.AddInputData(lejana)
+    union.Update()
+    implante = Implante(diametro=4.1, largo=10.0, apice=[0, 0, 4.0], eje=[0, 0, 1])
+    r = espesor_oseo(implante, union.GetOutput(), 1.5)
+    assert r["cavidades_en_contacto"] == []
 
 
 def test_margen_dientes_por_defecto_es_1_5_mm():
