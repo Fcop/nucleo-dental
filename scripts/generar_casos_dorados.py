@@ -24,6 +24,10 @@ x = -20 a x = 20 mm, centrados en y = 0, z = 0.
 - arcada_cbct.stl: cinco "cúspides" esféricas de distintos radios (dientes del CBCT).
 - escaneo_corrido.stl: la misma arcada corrida 0,5 mm en +x, más una lámina de
   "encía" en z = 4 que no existe en el CBCT (registro, R-015).
+- escaneo_arcada_recta.stl y dientes_arcada_recta.stl: tres dientes cúbicos de
+  6 mm por lado del eje x = 0 (bordes en x = 5/11, 13/19, 21/27), de z = 0 a 8,
+  sobre una encía plana en z = 0; en el CBCT siguen como raíz hasta z = -10
+  (región de apoyo, R-016).
 
 Este script NO escribe ningún esperado.json: los resultados esperados los
 calcula y escribe una persona.
@@ -169,6 +173,61 @@ def construir_escaneo_corrido(arcada: vtk.vtkPolyData) -> vtk.vtkPolyData:
     return union.GetOutput()
 
 
+# Arcada recta de la región de apoyo (R-016): eje del implante en x = 0; tres
+# dientes cúbicos de 6 mm por lado, de z = 0 (encía) a z = 8.
+DIENTES_ARCADA_RECTA = ((5.0, 11.0), (13.0, 19.0), (21.0, 27.0))
+_RESOLUCION_CARA_MM = 0.25
+
+
+def _cara(origen, punto1, punto2) -> vtk.vtkPolyData:
+    """Rectángulo triangulado con vértices cada ~0,25 mm."""
+    plano = vtk.vtkPlaneSource()
+    plano.SetOrigin(*origen)
+    plano.SetPoint1(*punto1)
+    plano.SetPoint2(*punto2)
+    plano.SetXResolution(max(1, int(round(np.linalg.norm(np.subtract(punto1, origen)) / _RESOLUCION_CARA_MM))))
+    plano.SetYResolution(max(1, int(round(np.linalg.norm(np.subtract(punto2, origen)) / _RESOLUCION_CARA_MM))))
+    triangulos = vtk.vtkTriangleFilter()
+    triangulos.SetInputConnection(plano.GetOutputPort())
+    triangulos.Update()
+    return triangulos.GetOutput()
+
+
+def construir_arcada_recta():
+    """(escaneo, dientes del CBCT) de la arcada recta.
+
+    Escaneo: encía plana en z = 0 más la cara oclusal y las cuatro paredes de
+    cada diente (superficie abierta, como un escaneo real). CBCT: cada diente
+    como caja cerrada que sigue bajo la encía (raíz) hasta z = -10.
+    """
+    union_escaneo = vtk.vtkAppendPolyData()
+    union_escaneo.AddInputData(_cara((-35, -8, 0), (35, -8, 0), (-35, 8, 0)))
+    union_cbct = vtk.vtkAppendPolyData()
+    for signo in (1.0, -1.0):
+        for x0, x1 in DIENTES_ARCADA_RECTA:
+            a, b = sorted((signo * x0, signo * x1))
+            caras = [((a, -3, 8), (b, -3, 8), (a, 3, 8)),     # oclusal
+                     ((a, -3, 0), (b, -3, 0), (a, -3, 8)),     # pared -y
+                     ((a, 3, 0), (b, 3, 0), (a, 3, 8)),        # pared +y
+                     ((a, -3, 0), (a, 3, 0), (a, -3, 8)),      # pared -x
+                     ((b, -3, 0), (b, 3, 0), (b, -3, 8))]      # pared +x
+            for cara in caras:
+                union_escaneo.AddInputData(_cara(*cara))
+            caja = vtk.vtkCubeSource()
+            caja.SetBounds(a, b, -3, 3, -10, 8)
+            tri = vtk.vtkTriangleFilter()
+            tri.SetInputConnection(caja.GetOutputPort())
+            tri.Update()
+            union_cbct.AddInputData(tri.GetOutput())
+    salidas = []
+    for union in (union_escaneo, union_cbct):
+        limpio = vtk.vtkCleanPolyData()
+        limpio.SetInputConnection(union.GetOutputPort())
+        limpio.Update()
+        salidas.append(limpio.GetOutput())
+    return tuple(salidas)
+
+
 def _malla(puntos: np.ndarray, triangulos: np.ndarray) -> vtk.vtkPolyData:
     triangulos = np.asarray(triangulos, dtype=np.int64)
     pd = vtk.vtkPolyData()
@@ -265,6 +324,12 @@ def main() -> None:
     escribir(arcada, "arcada_cbct.stl")
     escaneo = construir_escaneo_corrido(arcada)
     escribir(escaneo, "escaneo_corrido.stl")
+
+    print("escaneo_arcada_recta.stl / dientes_arcada_recta.stl")
+    escaneo_recto, dientes_recto = construir_arcada_recta()
+    verificar(dientes_recto, 6 * 6 * 6 * 18)
+    escribir(escaneo_recto, "escaneo_arcada_recta.stl")
+    escribir(dientes_recto, "dientes_arcada_recta.stl")
 
     for nombre, radio in (("hueso_009.stl", 4.0), ("hueso_010.stl", 4.5)):
         print(nombre)

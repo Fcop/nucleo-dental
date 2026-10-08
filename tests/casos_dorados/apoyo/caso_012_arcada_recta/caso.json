@@ -1,0 +1,7 @@
+{
+  "escaneo": "../../escaneo_arcada_recta.stl",
+  "dientes": "../../dientes_arcada_recta.stl",
+  "eje": {"punto": [0, 0, 0], "direccion": [0, 0, 1]},
+  "radio_mm": 20,
+  "margen_encia_mm": 1.0
+}

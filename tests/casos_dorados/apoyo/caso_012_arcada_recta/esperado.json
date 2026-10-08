@@ -1,0 +1,7 @@
+{
+  "dientes_dentro_x": [[-19, -13], [-11, -5], [5, 11], [13, 19]],
+  "dientes_fuera_x": [[-27, -21], [21, 27]],
+  "altura_minima_apoyo_mm": 1.0,
+  "incluye_encia": false,
+  "tolerancia_mm": 0.05
+}

@@ -25,7 +25,8 @@ Estado: ✅ hecho · ▶ en curso · ☐ pendiente
 Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el escaneo intraoral.
 
 - ✅ Registro del escaneo intraoral con el CBCT (R-015): `registrar` con caso dorado 011; caso real: coronas 0,61 → 0,31 mm (p90), corrección de 0,45 mm en el ápice. Umbral clínico de aceptación: se decidirá con más casos
-- ☐ Región de apoyo sobre los dientes vecinos
+- ▶ Región de apoyo (R-016): modo automático implementado (caso dorado 012 y caso real); falta el modo curva dibujada por el usuario y el comando
+- ☐ Pincel y edición interactiva de la región (etapa 5, en la app)
 - ☐ Camisa (sleeve) según la especificación del kit
 - ☐ Sobrefresado según el kit en la medición al canal (RP-003, RG-008)
 - ☐ Eje de inserción, eliminación de undercuts y tolerancia de ajuste
