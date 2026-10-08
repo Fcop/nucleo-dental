@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from dorados import CARPETAS_DORADAS, CASOS_DORADOS, leer_esperado
+from dorados import CARPETAS_DORADAS, CASOS_DORADOS, comparar, leer_esperado
 
 RAIZ = Path(__file__).resolve().parents[1]
 CANAL_RECTO = CASOS_DORADOS / "canal_recto.stl"
@@ -39,17 +39,7 @@ def test_caso_dorado_con_el_comando(carpeta):
     esperado = leer_esperado(carpeta)
     codigo, salida, stderr = ejecutar("medir", "--caso", carpeta / "caso.json")
     assert salida is not None, stderr
-    r = salida["resultado"]
-    tol = esperado["tolerancia_mm"]
-
-    assert set(r["estructuras"]) == set(esperado["estructuras"])
-    for nombre, e in esperado["estructuras"].items():
-        obtenido = r["estructuras"][nombre]
-        assert obtenido["distancia_mm"] == pytest.approx(e["distancia_mm"], abs=tol), nombre
-        assert obtenido["colision"] is e["colision"], nombre
-        assert obtenido["penetracion_mm"] == pytest.approx(e["penetracion_mm"], abs=tol), nombre
-        assert obtenido["semaforo"] == e["semaforo"], nombre
-    assert r["semaforo"] == esperado["semaforo"]
+    comparar(salida["resultado"], esperado)
     assert codigo == esperado["codigo_salida"]
 
 
@@ -228,6 +218,44 @@ def test_margen_dientes_configurable():
 )
 def test_dientes_errores_de_entrada(extra, texto):
     """Verifica R-008 y R-013: errores con --dientes devuelven 1 con mensaje claro."""
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, *extra, *ARGS_CASO_001)
+    assert codigo == 1
+    assert salida is None
+    assert texto in stderr
+
+
+HUESO_009 = CASOS_DORADOS / "hueso_009.stl"
+
+
+def test_hueso_con_parametros_sueltos():
+    """Verifica R-014 y R-007: --hueso agrega el espesor óseo, se traza su STL y el margen por defecto es 1,5 mm."""
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--hueso", HUESO_009, *ARGS_CASO_001)
+    assert salida is not None, stderr
+    hueso = salida["resultado"]["estructuras"]["hueso"]
+    assert hueso["espesor_minimo_mm"] == pytest.approx(1.45, abs=0.05)
+    assert hueso["margen_mm"] == 1.5
+    assert salida["resultado"]["semaforo"] == "rojo"
+    assert codigo == 2
+    assert salida["parametros"]["hueso"] == str(HUESO_009)
+    rutas = {Path(a["ruta"]).resolve() for a in salida["trazabilidad"]["archivos_entrada"]}
+    assert HUESO_009.resolve() in rutas
+
+
+def test_margen_hueso_configurable():
+    """Verifica R-014: con --margen-hueso 1.0, el espesor de 1,45 mm pasa a verde."""
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--hueso", HUESO_009,
+                                      "--margen-hueso", "1.0", *ARGS_CASO_001)
+    assert salida is not None, stderr
+    assert salida["resultado"]["estructuras"]["hueso"]["semaforo"] == "verde"
+    assert codigo == 0
+
+
+@pytest.mark.parametrize("extra, texto",
+                         [(["--margen-hueso", "1.0"], "--hueso"),
+                          (["--hueso", HUESO_009, "--margen-hueso", "-2"], "margen")],
+                         ids=["margen_sin_hueso", "margen_negativo"])
+def test_hueso_errores_de_entrada(extra, texto):
+    """Verifica R-008 y R-014: errores con --hueso devuelven 1 con mensaje claro."""
     codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, *extra, *ARGS_CASO_001)
     assert codigo == 1
     assert salida is None

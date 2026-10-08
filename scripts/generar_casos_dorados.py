@@ -18,6 +18,9 @@ x = -20 a x = 20 mm, centrados en y = 0, z = 0.
   y = 8,0 entre z = 5 y z = 13 (pared en y = 5,0) y "corona" con centro en
   y = 5,5 entre z = 15 y z = 25 (pared en y = 2,5), toda sobre la plataforma
   del implante del caso 001 (z = 14). Prueba que la corona no cuenta (R-013).
+- hueso_009.stl y hueso_010.stl: tubo de hueso simplificado, cilindro vertical
+  de z = 0 a z = 20 con centro en y = 0,5 y radio 4,0 o 4,5 (bordes en
+  y = -3,5 / 4,5 y y = -4,0 / 5,0). Rodea al implante del caso 001 (R-014).
 
 Este script NO escribe ningún esperado.json: los resultados esperados los
 calcula y escribe una persona.
@@ -102,10 +105,12 @@ def construir_canal_grueso() -> vtk.vtkPolyData:
     return _malla(puntos, np.array(triangulos))
 
 
-def construir_diente(centro_y: float, z_min: float = 5.0, z_max: float = 25.0) -> vtk.vtkPolyData:
+def construir_diente(centro_y: float, z_min: float = 5.0, z_max: float = 25.0,
+                     radio: float = RADIO_DIENTE) -> vtk.vtkPolyData:
+    """Cilindro vertical cerrado (raíz o tubo de hueso simplificado) con centro en x = 0."""
     from nucleo_dental.implante import Implante
 
-    malla = Implante(diametro=2 * RADIO_DIENTE, largo=z_max - z_min, apice=[0.0, centro_y, z_min],
+    malla = Implante(diametro=2 * radio, largo=z_max - z_min, apice=[0.0, centro_y, z_min],
                      eje=[0.0, 0.0, 1.0]).como_malla(lados=LADOS)
     # Anula los residuos de punto flotante (cos(3π/2) = -1.8e-16) para que el
     # vértice de la pared que mira al implante quede exacto.
@@ -204,6 +209,13 @@ def main() -> None:
     verificar(diente_008, np.pi * RADIO_DIENTE ** 2 * (8.0 + 10.0),
               vertices_exactos=([0.0, 5.0, 5.0], [0.0, 2.5, 15.0]))
     escribir(diente_008, "diente_008.stl")
+
+    for nombre, radio in (("hueso_009.stl", 4.0), ("hueso_010.stl", 4.5)):
+        print(nombre)
+        hueso = construir_diente(0.5, 0.0, 20.0, radio=radio)
+        verificar(hueso, np.pi * radio ** 2 * 20.0,
+                  vertices_exactos=([0.0, 0.5 - radio, 0.0], [0.0, 0.5 + radio, 0.0]))
+        escribir(hueso, nombre)
 
 
 if __name__ == "__main__":

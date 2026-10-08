@@ -20,6 +20,13 @@ MARGEN_DIENTES_POR_DEFECTO_MM = 1.5
 # Estructuras cuyo margen es óseo: se evalúan solo bajo el plano de la
 # plataforma, sin la corona (decisión clínica 2026-10-08, R-013).
 ESTRUCTURAS_BAJO_PLATAFORMA = {"dientes"}
+# Espesor óseo mínimo en las paredes laterales (R-014, decisión clínica 2026-10-08).
+MARGEN_HUESO_POR_DEFECTO_MM = 1.5
+# Estructuras que se evalúan por espesor alrededor del implante, no por distancia.
+ESTRUCTURAS_ESPESOR = {"hueso"}
+_PASO_RAYOS_MM = 0.25        # separación de los rayos en altura y contorno, y paso grueso a lo largo
+_PASO_FINO_MM = 0.01         # resolución final del espesor
+_ESPESOR_MAXIMO_MM = 10.0    # más allá, el espesor se informa como 10 mm
 
 # Separación entre puntos muestreados sobre el implante. Con 0,05 mm el error
 # de muestreo queda bajo los 0,05 mm que exige R-004.
@@ -148,6 +155,64 @@ def recortar_bajo_plataforma(malla: vtk.vtkPolyData, implante: Implante):
     return resultado if resultado.GetNumberOfCells() > 0 else None
 
 
+def espesor_oseo(implante: Implante, malla_hueso: vtk.vtkPolyData, margen: float = None) -> dict:
+    """Espesor mínimo de hueso alrededor de las paredes laterales del implante (R-014).
+
+    Desde puntos de la pared lateral (cada ~0,25 mm en altura y en contorno,
+    del borde del ápice a la plataforma) se lanzan rayos perpendiculares al
+    eje, hacia afuera, y se mide cuánto hueso atraviesa cada uno antes de
+    salir. Bajo el ápice no se mide (decisión clínica 2026-10-08). Una pared
+    fuera del hueso tiene espesor 0. El valor se redondea hacia abajo
+    (conservador) con resolución de 0,01 mm.
+    """
+    margen = MARGEN_HUESO_POR_DEFECTO_MM if margen is None else float(margen)
+    if not np.isfinite(margen) or margen < 0:
+        raise ValueError(f"El margen debe ser un número mayor o igual que 0 mm (se recibió {margen}).")
+    _exigir_superficie_cerrada(malla_hueso)
+
+    e1, e2 = implante._base_perpendicular()
+    n_direcciones = 4 * int(np.ceil(2 * np.pi * implante.radio / (4 * _PASO_RAYOS_MM)))
+    angulos = 2 * np.pi * np.arange(n_direcciones) / n_direcciones
+    direcciones = np.cos(angulos)[:, None] * e1 + np.sin(angulos)[:, None] * e2
+    alturas = np.linspace(0.0, implante.largo, int(np.ceil(implante.largo / _PASO_RAYOS_MM)) + 1)
+
+    origen = (implante.apice + alturas[:, None, None] * implante.eje
+              + implante.radio * direcciones[None, :, :]).reshape(-1, 3)
+    direccion = np.tile(direcciones, (len(alturas), 1))
+    altura = np.repeat(alturas, n_direcciones)
+
+    # 1) Muestreo grueso a lo largo de cada rayo: primer paso fuera del hueso.
+    pasos = np.arange(0.0, _ESPESOR_MAXIMO_MM + _PASO_RAYOS_MM / 2, _PASO_RAYOS_MM)
+    puntos = origen[:, None, :] + pasos[None, :, None] * direccion[:, None, :]
+    dentro = _dentro(malla_hueso, puntos.reshape(-1, 3)).reshape(len(origen), len(pasos))
+    sale = ~dentro
+    tiene_salida = sale.any(axis=1)
+    primer_fuera = np.argmax(sale, axis=1)
+    espesor = np.where(tiene_salida, 0.0, _ESPESOR_MAXIMO_MM)
+
+    # 2) Refinado fino entre el último paso dentro y el primero fuera.
+    refinar = tiene_salida & (primer_fuera > 0)
+    if refinar.any():
+        base = pasos[primer_fuera[refinar] - 1]
+        finos = np.arange(_PASO_FINO_MM, _PASO_RAYOS_MM + _PASO_FINO_MM / 2, _PASO_FINO_MM)
+        s = base[:, None] + finos[None, :]
+        puntos_finos = origen[refinar][:, None, :] + s[:, :, None] * direccion[refinar][:, None, :]
+        dentro_fino = _dentro(malla_hueso, puntos_finos.reshape(-1, 3)).reshape(s.shape)
+        # Último paso fino aún dentro (o la base si el primero ya sale): valor conservador.
+        n_dentro = np.cumprod(dentro_fino, axis=1).sum(axis=1)
+        espesor[refinar] = base + n_dentro * _PASO_FINO_MM
+
+    i = int(np.argmin(espesor))
+    minimo = float(espesor[i])
+    return {
+        "espesor_minimo_mm": minimo,
+        "margen_mm": margen,
+        "semaforo": "verde" if minimo >= margen else "rojo",
+        "direccion_minimo": [float(v) for v in direccion[i]],
+        "altura_minimo_sobre_apice_mm": float(altura[i]),
+    }
+
+
 def evaluar_plan(implante: Implante, estructuras: dict) -> dict:
     """Evalúa el implante contra cada estructura con su propio margen (R-013).
 
@@ -159,6 +224,9 @@ def evaluar_plan(implante: Implante, estructuras: dict) -> dict:
         raise ValueError("No hay ninguna estructura contra la cual evaluar el implante.")
     por_estructura = {}
     for nombre, (malla, margen) in estructuras.items():
+        if nombre in ESTRUCTURAS_ESPESOR:
+            por_estructura[nombre] = espesor_oseo(implante, malla, margen)
+            continue
         if nombre in ESTRUCTURAS_BAJO_PLATAFORMA:
             _exigir_superficie_cerrada(malla)
             malla = recortar_bajo_plataforma(malla, implante)
@@ -222,18 +290,21 @@ def _distancia_con_signo(malla: vtk.vtkPolyData):
         salida = vtk.vtkDoubleArray()
         implicita.FunctionValue(entrada, salida)
         distancia = np.abs(numpy_support.vtk_to_numpy(salida))
-
-        vtk_puntos = vtk.vtkPoints()
-        vtk_puntos.SetData(entrada)
-        consulta = vtk.vtkPolyData()
-        consulta.SetPoints(vtk_puntos)
-        encerrados = vtk.vtkSelectEnclosedPoints()
-        encerrados.SetInputData(consulta)
-        encerrados.SetSurfaceData(malla)
-        encerrados.SetTolerance(1e-9)
-        encerrados.Update()
-        dentro = numpy_support.vtk_to_numpy(
-            encerrados.GetOutput().GetPointData().GetArray("SelectedPoints")).astype(bool)
-        return np.where(dentro, -distancia, distancia)
+        return np.where(_dentro(malla, puntos), -distancia, distancia)
 
     return evaluar
+
+
+def _dentro(malla: vtk.vtkPolyData, puntos: np.ndarray) -> np.ndarray:
+    """True por cada punto (N×3) encerrado por la superficie cerrada (lanzamiento de rayos)."""
+    vtk_puntos = vtk.vtkPoints()
+    vtk_puntos.SetData(numpy_support.numpy_to_vtk(np.ascontiguousarray(puntos, dtype=float), deep=True))
+    consulta = vtk.vtkPolyData()
+    consulta.SetPoints(vtk_puntos)
+    encerrados = vtk.vtkSelectEnclosedPoints()
+    encerrados.SetInputData(consulta)
+    encerrados.SetSurfaceData(malla)
+    encerrados.SetTolerance(1e-9)
+    encerrados.Update()
+    return numpy_support.vtk_to_numpy(
+        encerrados.GetOutput().GetPointData().GetArray("SelectedPoints")).astype(bool)

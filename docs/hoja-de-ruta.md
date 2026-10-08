@@ -16,7 +16,7 @@ Estado: ✅ hecho · ▶ en curso · ☐ pendiente
 ## Etapa 2 — Completar la seguridad del plan ▶
 
 - ✅ **2a** Distancia al diente vecino bajo la plataforma, margen 1,5 mm (R-013): casos dorados 006-008 y caso real (programa 7,530 mm = manual 7,529 mm)
-- ☐ **2b** Implante contenido en el hueso, sin perforar cortical (requiere definir el espesor mínimo)
+- ▶ **2b** Espesor óseo mínimo de 1,5 mm en las paredes laterales (R-014): implementado con casos dorados 009-010; falta validar con el caso real contra medición manual
 - ☐ **2c** Sobrefresado según el kit (RP-003, RG-008), junto con la guía
 - ☐ **2d** Verificación del canal contra la imagen del CBCT (RG-011)
 

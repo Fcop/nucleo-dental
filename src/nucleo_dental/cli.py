@@ -22,14 +22,18 @@ from pathlib import Path
 from vtk.util import numpy_support
 
 from nucleo_dental.implante import Implante
-from nucleo_dental.medicion import MARGEN_DIENTES_POR_DEFECTO_MM, MARGEN_POR_DEFECTO_MM, evaluar_plan, leer_stl
+from nucleo_dental.medicion import (MARGEN_DIENTES_POR_DEFECTO_MM, MARGEN_HUESO_POR_DEFECTO_MM,
+                                    MARGEN_POR_DEFECTO_MM, evaluar_plan, leer_stl)
 
 CODIGO_VERDE = 0
 CODIGO_ERROR_ENTRADA = 1
 CODIGO_ROJO = 2
 
 PARAMETROS_SUELTOS = ("canal", "diametro", "largo", "apice", "eje", "implante_stl", "apice_hacia", "margen",
-                      "dientes", "margen_dientes")
+                      "dientes", "margen_dientes", "hueso", "margen_hueso")
+
+# Estructuras opcionales además del canal: nombre -> margen por defecto (mm).
+ESTRUCTURAS_OPCIONALES = {"dientes": MARGEN_DIENTES_POR_DEFECTO_MM, "hueso": MARGEN_HUESO_POR_DEFECTO_MM}
 
 # Diferencia admitida entre las medidas declaradas y las del STL del implante
 # (R-012, decisión clínica 2026-10-08).
@@ -98,6 +102,9 @@ def _crear_parser() -> argparse.ArgumentParser:
     m.add_argument("--dientes", help="STL cerrado de los dientes (p. ej. segmentación de la arcada), en LPS: "
                                      "agrega la distancia a los dientes al semáforo.")
     m.add_argument("--margen-dientes", help=f"Margen a los dientes en mm (por defecto {MARGEN_DIENTES_POR_DEFECTO_MM}).")
+    m.add_argument("--hueso", help="STL cerrado del hueso (p. ej. Mandible.stl), en LPS: agrega el espesor óseo "
+                                   "mínimo alrededor de las paredes laterales del implante al semáforo.")
+    m.add_argument("--margen-hueso", help=f"Espesor óseo mínimo en mm (por defecto {MARGEN_HUESO_POR_DEFECTO_MM}).")
     m.add_argument("--cbct", help="Carpeta con la serie DICOM del CBCT: verifica que canal e implante "
                                   "caigan dentro del volumen (detecta RAS/LPS mezclados). Requiere SimpleITK.")
     return parser
@@ -116,8 +123,8 @@ def _medir(args) -> dict:
         if "stl" in especificacion:
             especificacion["stl"] = str(ruta_caso.parent / especificacion["stl"])
         margen = caso["margen"]
-        ruta_dientes = ruta_caso.parent / caso["dientes"] if "dientes" in caso else None
-        margen_dientes = caso.get("margen_dientes", MARGEN_DIENTES_POR_DEFECTO_MM)
+        opcionales = {n: (ruta_caso.parent / caso[n], caso.get(f"margen_{n}", defecto))
+                      for n, defecto in ESTRUCTURAS_OPCIONALES.items() if n in caso}
         archivos = [ruta_caso, ruta_canal]
     else:
         if not sueltos:
@@ -126,22 +133,18 @@ def _medir(args) -> dict:
         especificacion = _implante_desde_argumentos(args)
         if args.canal is None:
             raise ErrorEntrada("faltan parámetros: --canal")
-        if args.margen_dientes is not None and args.dientes is None:
-            raise ErrorEntrada("--margen-dientes solo se usa junto con --dientes")
         ruta_canal = Path(args.canal)
         margen = MARGEN_POR_DEFECTO_MM if args.margen is None else _numero(args.margen, "--margen")
-        ruta_dientes = Path(args.dientes) if args.dientes is not None else None
-        margen_dientes = (MARGEN_DIENTES_POR_DEFECTO_MM if args.margen_dientes is None
-                          else _numero(args.margen_dientes, "--margen-dientes"))
+        opcionales = _opcionales_desde_argumentos(args)
         archivos = [ruta_canal]
 
     implante, implante_dict = _construir_implante(especificacion)
     if "stl" in implante_dict:
         archivos.append(Path(implante_dict["stl"]))
     estructuras = {"canal": (leer_stl(ruta_canal), margen)}
-    if ruta_dientes is not None:
-        estructuras["dientes"] = (leer_stl(ruta_dientes), margen_dientes)
-        archivos.append(ruta_dientes)
+    for nombre, (ruta, margen_opcional) in opcionales.items():
+        estructuras[nombre] = (leer_stl(ruta), margen_opcional)
+        archivos.append(ruta)
 
     cbct = None
     if args.cbct is not None:
@@ -154,8 +157,8 @@ def _medir(args) -> dict:
         cbct = volumen.descripcion()
 
     parametros = {"canal": str(ruta_canal), "implante": implante_dict, "margen": margen}
-    if ruta_dientes is not None:
-        parametros.update({"dientes": str(ruta_dientes), "margen_dientes": margen_dientes})
+    for nombre, (ruta, margen_opcional) in opcionales.items():
+        parametros.update({nombre: str(ruta), f"margen_{nombre}": margen_opcional})
     parametros.update({"sistema_coordenadas": "LPS", "unidades": "mm"})
 
     salida = {
@@ -166,6 +169,18 @@ def _medir(args) -> dict:
     if cbct is not None:
         salida["cbct"] = cbct
     return salida
+
+
+def _opcionales_desde_argumentos(args) -> dict:
+    """{nombre: (ruta, margen)} de las estructuras opcionales indicadas con --dientes, --hueso, etc."""
+    opcionales = {}
+    for nombre, defecto in ESTRUCTURAS_OPCIONALES.items():
+        ruta, margen = getattr(args, nombre), getattr(args, f"margen_{nombre}")
+        if margen is not None and ruta is None:
+            raise ErrorEntrada(f"--margen-{nombre} solo se usa junto con --{nombre}")
+        if ruta is not None:
+            opcionales[nombre] = (Path(ruta), defecto if margen is None else _numero(margen, f"--margen-{nombre}"))
+    return opcionales
 
 
 def _implante_desde_argumentos(args) -> dict:

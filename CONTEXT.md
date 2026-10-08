@@ -30,6 +30,14 @@ _Evitar_: nervio (cuando se habla de la geometría), conducto dentario
 Superficie cerrada de los dientes segmentados de la arcada (corona y raíz); el diente vecino al implante es el que importa para la seguridad.
 _Evitar_: raíces (como estructura), piezas
 
+**Hueso**:
+Superficie cerrada del hueso segmentado (mandíbula) que debe rodear al implante.
+_Evitar_: tejido óseo (como estructura), reborde
+
+**Espesor óseo**:
+Hueso que queda entre la pared lateral del implante y la superficie externa del hueso, medido perpendicular al eje; el mínimo alrededor del implante se compara con el margen de hueso. Bajo el ápice no se mide.
+_Evitar_: tabla ósea (como término de software), ancho de hueso, distancia al hueso
+
 **Estructura**:
 Cada anatomía contra la que se evalúa el implante (canal mandibular, dientes), con su propio margen.
 _Evitar_: objeto, órgano, malla (cuando se habla del concepto clínico)

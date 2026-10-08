@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from dorados import CARPETAS_DORADAS, CASOS_DORADOS, leer_caso, leer_esperado
+from dorados import CARPETAS_DORADAS, CASOS_DORADOS, comparar, leer_caso, leer_esperado
 from nucleo_dental.implante import Implante
-from nucleo_dental.medicion import MARGEN_DIENTES_POR_DEFECTO_MM, evaluar_plan, leer_stl, medir
+from nucleo_dental.medicion import (MARGEN_DIENTES_POR_DEFECTO_MM, MARGEN_HUESO_POR_DEFECTO_MM, espesor_oseo,
+                                    evaluar_plan, leer_stl, medir)
 
 CANAL_RECTO = CASOS_DORADOS / "canal_recto.stl"
 
@@ -24,26 +25,54 @@ def _cargar_caso(carpeta: Path):
     if "dientes" in caso:
         estructuras["dientes"] = (leer_stl(carpeta / caso["dientes"]),
                                   caso.get("margen_dientes", MARGEN_DIENTES_POR_DEFECTO_MM))
+    if "hueso" in caso:
+        estructuras["hueso"] = (leer_stl(carpeta / caso["hueso"]),
+                                caso.get("margen_hueso", MARGEN_HUESO_POR_DEFECTO_MM))
     return implante, estructuras, leer_esperado(carpeta)
 
 
-def _comparar(resultado: dict, esperado: dict):
-    tol = esperado["tolerancia_mm"]
-    assert set(resultado["estructuras"]) == set(esperado["estructuras"])
-    for nombre, e in esperado["estructuras"].items():
-        r = resultado["estructuras"][nombre]
-        assert r["distancia_mm"] == pytest.approx(e["distancia_mm"], abs=tol), nombre
-        assert r["colision"] is e["colision"], nombre
-        assert r["penetracion_mm"] == pytest.approx(e["penetracion_mm"], abs=tol), nombre
-        assert r["semaforo"] == e["semaforo"], nombre
-    assert resultado["semaforo"] == esperado["semaforo"]
-
-
 def test_hay_casos_dorados():
-    """Verifica R-004 y R-013: existen los casos dorados escritos a mano (005 = malla gruesa; 006-008 = dientes)."""
+    """Verifica R-004, R-013 y R-014: existen los casos dorados escritos a mano (005 = malla gruesa; 006-008 = dientes; 009-010 = hueso)."""
     assert [c.name for c in CARPETAS_DORADAS] == [
         "caso_001", "caso_002", "caso_003", "caso_004_eje_invertido", "caso_005_malla_gruesa",
-        "caso_006_diente_verde", "caso_007_diente_rojo", "caso_008_corona_no_cuenta"]
+        "caso_006_diente_verde", "caso_007_diente_rojo", "caso_008_corona_no_cuenta",
+        "caso_009_hueso_rojo", "caso_010_hueso_verde"]
+
+
+def test_margen_hueso_por_defecto_es_1_5_mm():
+    """Verifica R-014: el espesor óseo mínimo por defecto en las paredes laterales es 1,5 mm."""
+    assert MARGEN_HUESO_POR_DEFECTO_MM == 1.5
+
+
+def test_pared_fuera_del_hueso_da_espesor_cero():
+    """Verifica R-014: si parte de la pared lateral queda fuera del hueso (dehiscencia), el espesor es 0 y es rojo.
+
+    Hueso 010 (de z = 0 a 20) con el implante subido a ápice z = 15: las paredes sobre z = 20 quedan fuera.
+    """
+    implante = Implante(diametro=4.1, largo=10.0, apice=[0, 0, 15.0], eje=[0, 0, 1])
+    r = espesor_oseo(implante, leer_stl(CASOS_DORADOS / "hueso_010.stl"), 1.5)
+    assert r["espesor_minimo_mm"] == 0.0
+    assert r["semaforo"] == "rojo"
+
+
+def test_bajo_el_apice_no_cuenta():
+    """Verifica R-014: el hueso bajo el ápice no se mide; con solo 0,25 mm de hueso bajo el ápice no da rojo.
+
+    Hueso 010 va de z = 0 a 20; implante con ápice en z = 0,25: espesor lateral sigue siendo 1,95.
+    """
+    implante = Implante(diametro=4.1, largo=10.0, apice=[0, 0, 0.25], eje=[0, 0, 1])
+    r = espesor_oseo(implante, leer_stl(CASOS_DORADOS / "hueso_010.stl"), 1.5)
+    assert r["espesor_minimo_mm"] == pytest.approx(1.95, abs=0.05)
+    assert r["semaforo"] == "verde"
+
+
+def test_espesor_informa_donde_esta_el_minimo():
+    """Verifica R-014: la salida indica la dirección (LPS) y la altura sobre el ápice del espesor mínimo (caso 009: hacia -y)."""
+    implante, estructuras, _ = _cargar_caso(CASOS_DORADOS / "caso_009_hueso_rojo")
+    malla, margen = estructuras["hueso"]
+    r = espesor_oseo(implante, malla, margen)
+    assert r["direccion_minimo"] == pytest.approx([0, -1, 0], abs=1e-6)
+    assert 0.0 <= r["altura_minimo_sobre_apice_mm"] <= 10.0
 
 
 def test_margen_dientes_por_defecto_es_1_5_mm():
@@ -214,7 +243,7 @@ def test_canal_con_normales_invertidas_da_el_mismo_resultado(carpeta):
         invertir.Update()
         invertidas[nombre] = (invertir.GetOutput(), margen)
 
-    _comparar(evaluar_plan(implante, invertidas), esperado)
+    comparar(evaluar_plan(implante, invertidas), esperado)
 
 
 @pytest.mark.parametrize("margen", [-1.0, float("nan")], ids=["negativo", "nan"])
@@ -228,4 +257,4 @@ def test_margen_invalido_se_rechaza(margen):
 def test_caso_dorado(carpeta):
     """Verifica R-002, R-004, R-005, R-006, R-009 y R-013 contra los resultados calculados a mano."""
     implante, estructuras, esperado = _cargar_caso(carpeta)
-    _comparar(evaluar_plan(implante, estructuras), esperado)
+    comparar(evaluar_plan(implante, estructuras), esperado)

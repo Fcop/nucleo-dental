@@ -57,17 +57,10 @@ def test_modelo_real_se_lee_y_es_cerrado(modelo):
 
 @pytest.mark.skipif(not (CASO / "esperado.json").is_file(), reason="sin medición manual de referencia")
 def _comparar_con_medicion_manual(salida, codigo):
-    from dorados import leer_esperado
+    from dorados import comparar, leer_esperado
 
     esperado = leer_esperado(CASO)
-    tol = esperado["tolerancia_mm"]
-    for nombre, e in esperado["estructuras"].items():
-        r = salida["resultado"]["estructuras"][nombre]
-        assert r["distancia_mm"] == pytest.approx(e["distancia_mm"], abs=tol), nombre
-        assert r["colision"] is e["colision"], nombre
-        assert r["penetracion_mm"] == pytest.approx(e["penetracion_mm"], abs=tol), nombre
-        assert r["semaforo"] == e["semaforo"], nombre
-    assert salida["resultado"]["semaforo"] == esperado["semaforo"]
+    comparar(salida["resultado"], esperado)
     assert codigo == esperado["codigo_salida"]
 
 
