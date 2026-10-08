@@ -24,7 +24,7 @@ Estado: ✅ hecho · ▶ en curso · ☐ pendiente
 
 Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el escaneo intraoral.
 
-- ▶ Registro del escaneo intraoral con el CBCT (R-015): `registrar` implementado con caso dorado 011; falta el caso real y el umbral clínico de aceptación
+- ✅ Registro del escaneo intraoral con el CBCT (R-015): `registrar` con caso dorado 011; caso real: coronas 0,61 → 0,31 mm (p90), corrección de 0,45 mm en el ápice. Umbral clínico de aceptación: se decidirá con más casos
 - ☐ Región de apoyo sobre los dientes vecinos
 - ☐ Camisa (sleeve) según la especificación del kit
 - ☐ Sobrefresado según el kit en la medición al canal (RP-003, RG-008)
