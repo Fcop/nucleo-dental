@@ -61,6 +61,62 @@ def test_semaforo_global_es_rojo_si_alguna_estructura_es_roja():
     assert r["estructuras"]["dientes"]["margen_mm"] == 1.5
 
 
+def test_recorte_bajo_plataforma_deja_un_solido_cerrado_bajo_el_plano():
+    """Verifica R-013: el diente recortado queda cerrado y no tiene nada sobre el plano de la plataforma."""
+    import numpy as np
+    import vtk
+    from vtk.util import numpy_support
+
+    from nucleo_dental.medicion import recortar_bajo_plataforma
+
+    implante = _implante_caso_001()                       # plataforma en z = 14
+    diente = leer_stl(CASOS_DORADOS / "diente_006.stl")   # z de 5 a 25
+    recortado = recortar_bajo_plataforma(diente, implante)
+
+    puntos = numpy_support.vtk_to_numpy(recortado.GetPoints().GetData())
+    assert puntos[:, 2].max() == pytest.approx(14.0, abs=1e-6)
+    assert puntos[:, 2].min() == pytest.approx(5.0, abs=1e-6)
+    bordes = vtk.vtkFeatureEdges()
+    bordes.SetInputData(recortado)
+    bordes.BoundaryEdgesOn()
+    bordes.NonManifoldEdgesOn()
+    bordes.FeatureEdgesOff()
+    bordes.ManifoldEdgesOff()
+    bordes.Update()
+    assert bordes.GetOutput().GetNumberOfCells() == 0
+
+
+def test_recorte_bajo_plataforma_de_un_diente_entero_sobre_ella_queda_vacio():
+    """Verifica R-013: si todo el diente está sobre la plataforma, el recorte queda vacío (no se evalúa)."""
+    from nucleo_dental.medicion import recortar_bajo_plataforma
+
+    alto = Implante(diametro=6.0, largo=5.0, apice=[0, 7, 20], eje=[0, 0, 1]).como_malla()  # z de 20 a 25
+    assert recortar_bajo_plataforma(alto, _implante_caso_001()) is None
+
+
+def test_dentro_o_fuera_es_correcto_junto_al_borde_del_recorte():
+    """Verifica R-013 y RG-014: junto al borde vivo que deja el recorte, cada punto se clasifica bien.
+
+    El diente 006 recortado es un cilindro de radio 3 con centro en (0, 7), de
+    z = 5 a z = 14: dentro/fuera se conoce exactamente. El signo de la
+    distancia basado en normales se equivocaba justo en este borde.
+    """
+    import numpy as np
+
+    from nucleo_dental.medicion import _distancia_con_signo, recortar_bajo_plataforma
+
+    recortado = recortar_bajo_plataforma(leer_stl(CASOS_DORADOS / "diente_006.stl"), _implante_caso_001())
+    rng = np.random.default_rng(0)
+    angulo = rng.uniform(0, 2 * np.pi, 400)
+    radio = rng.choice([2.5, 2.8, 3.2, 3.5], 400)
+    z = rng.choice([13.5, 13.8, 14.2, 14.5], 400)
+    puntos = np.column_stack([radio * np.cos(angulo), 7 + radio * np.sin(angulo), z])
+    dentro_real = (radio < 3) & (z < 14)
+
+    signo = _distancia_con_signo(recortado)(puntos)
+    assert np.array_equal(signo < 0, dentro_real)
+
+
 def test_evaluar_plan_exige_al_menos_una_estructura():
     """Verifica R-013: sin estructuras no hay nada que evaluar; es error, no verde."""
     with pytest.raises(ValueError, match="estructura"):

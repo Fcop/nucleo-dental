@@ -17,6 +17,9 @@ from nucleo_dental.implante import Implante
 MARGEN_POR_DEFECTO_MM = 2.0
 # Margen implante–diente vecino (RP-001 → R-013, decisión clínica 2026-10-07).
 MARGEN_DIENTES_POR_DEFECTO_MM = 1.5
+# Estructuras cuyo margen es óseo: se evalúan solo bajo el plano de la
+# plataforma, sin la corona (decisión clínica 2026-10-08, R-013).
+ESTRUCTURAS_BAJO_PLATAFORMA = {"dientes"}
 
 # Separación entre puntos muestreados sobre el implante. Con 0,05 mm el error
 # de muestreo queda bajo los 0,05 mm que exige R-004.
@@ -109,16 +112,59 @@ def medir(implante: Implante, malla_canal: vtk.vtkPolyData,
     }
 
 
+def recortar_bajo_plataforma(malla: vtk.vtkPolyData, implante: Implante):
+    """Parte de la malla bajo el plano de la plataforma, como sólido cerrado (R-013).
+
+    El margen a los dientes es óseo (raíz), no protésico: la corona sobre la
+    plataforma no cuenta. El corte se cierra con una tapa en el plano para que
+    la colisión siga bien definida. Devuelve None si no queda nada bajo el plano.
+    """
+    planos = vtk.vtkPlaneCollection()
+    plano = vtk.vtkPlane()
+    plano.SetOrigin(*implante.plataforma)
+    plano.SetNormal(*(-implante.eje))   # se conserva el lado hacia el ápice
+    planos.AddItem(plano)
+
+    # El recorte depende de la orientación de los triángulos: con normales
+    # invertidas deja la malla abierta (RG-010). Se orientan antes de cortar.
+    orientada = vtk.vtkPolyDataNormals()
+    orientada.SetInputData(malla)
+    orientada.ConsistencyOn()
+    orientada.AutoOrientNormalsOn()
+    orientada.SplittingOff()
+
+    recorte = vtk.vtkClipClosedSurface()
+    recorte.SetInputConnection(orientada.GetOutputPort())
+    recorte.SetClippingPlanes(planos)
+    recorte.GenerateFacesOn()
+    triangulos = vtk.vtkTriangleFilter()
+    triangulos.SetInputConnection(recorte.GetOutputPort())
+    limpio = vtk.vtkCleanPolyData()
+    limpio.SetInputConnection(triangulos.GetOutputPort())
+    limpio.Update()
+
+    resultado = vtk.vtkPolyData()
+    resultado.DeepCopy(limpio.GetOutput())
+    return resultado if resultado.GetNumberOfCells() > 0 else None
+
+
 def evaluar_plan(implante: Implante, estructuras: dict) -> dict:
     """Evalúa el implante contra cada estructura con su propio margen (R-013).
 
     estructuras: {nombre: (malla, margen_mm)}, p. ej. {"canal": (..., 2.0), "dientes": (..., 1.5)}.
+    Los dientes se evalúan solo bajo la plataforma (ver recortar_bajo_plataforma).
     El semáforo global es rojo si alguna estructura está en rojo.
     """
     if not estructuras:
         raise ValueError("No hay ninguna estructura contra la cual evaluar el implante.")
     por_estructura = {}
     for nombre, (malla, margen) in estructuras.items():
+        if nombre in ESTRUCTURAS_BAJO_PLATAFORMA:
+            _exigir_superficie_cerrada(malla)
+            malla = recortar_bajo_plataforma(malla, implante)
+            if malla is None:
+                raise ValueError(f"La malla de {nombre} no tiene ninguna parte bajo la plataforma del implante; "
+                                 "revisa la segmentación o la posición del implante.")
         resultado = medir(implante, malla, margen)
         resultado["margen_mm"] = float(margen)
         por_estructura[nombre] = resultado
@@ -154,26 +200,40 @@ def _exigir_superficie_cerrada(malla: vtk.vtkPolyData) -> None:
     n = bordes.GetOutput().GetNumberOfCells()
     if n:
         raise ValueError(
-            f"La malla del canal no es una superficie cerrada ({n} aristas abiertas o no manifold). "
-            "Ciérrala (tapas en los extremos) antes de medir.")
+            f"La malla de la estructura (canal o dientes) no es una superficie cerrada ({n} aristas abiertas "
+            "o no manifold). Ciérrala (tapas en los extremos) antes de medir.")
 
 
 def _distancia_con_signo(malla: vtk.vtkPolyData):
-    """Función vectorizada: distancia con signo a la superficie (negativa dentro)."""
-    normales = vtk.vtkPolyDataNormals()
-    normales.SetInputData(malla)
-    normales.ConsistencyOn()
-    normales.AutoOrientNormalsOn()
-    normales.SplittingOff()
-    normales.Update()
+    """Función vectorizada: distancia con signo a la superficie (negativa dentro).
 
+    El valor absoluto sale de vtkImplicitPolyDataDistance; el signo (dentro o
+    fuera) NO se toma de ahí: ese signo depende de las normales y se equivoca
+    junto a bordes vivos, como la tapa que deja el recorte bajo la plataforma.
+    La pertenencia se decide con vtkSelectEnclosedPoints (lanzamiento de rayos),
+    que solo exige una superficie cerrada (RG-010, RG-014).
+    """
     implicita = vtk.vtkImplicitPolyDataDistance()
-    implicita.SetInput(normales.GetOutput())
+    implicita.SetInput(malla)
 
     def evaluar(puntos: np.ndarray) -> np.ndarray:
-        entrada = numpy_support.numpy_to_vtk(np.ascontiguousarray(puntos, dtype=float), deep=True)
+        puntos = np.ascontiguousarray(puntos, dtype=float)
+        entrada = numpy_support.numpy_to_vtk(puntos, deep=True)
         salida = vtk.vtkDoubleArray()
         implicita.FunctionValue(entrada, salida)
-        return numpy_support.vtk_to_numpy(salida).copy()
+        distancia = np.abs(numpy_support.vtk_to_numpy(salida))
+
+        vtk_puntos = vtk.vtkPoints()
+        vtk_puntos.SetData(entrada)
+        consulta = vtk.vtkPolyData()
+        consulta.SetPoints(vtk_puntos)
+        encerrados = vtk.vtkSelectEnclosedPoints()
+        encerrados.SetInputData(consulta)
+        encerrados.SetSurfaceData(malla)
+        encerrados.SetTolerance(1e-9)
+        encerrados.Update()
+        dentro = numpy_support.vtk_to_numpy(
+            encerrados.GetOutput().GetPointData().GetArray("SelectedPoints")).astype(bool)
+        return np.where(dentro, -distancia, distancia)
 
     return evaluar

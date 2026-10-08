@@ -14,6 +14,10 @@ x = -20 a x = 20 mm, centrados en y = 0, z = 0.
   radio 3,0 mm entre z = 5 y z = 25, con 64 lados y centro en x = 0 e
   y = 7,0 o y = 6,3. Hay un vértice exacto en la pared que mira al implante
   (y = 4,0 y y = 3,3).
+- diente_008.stl: dos piezas cerradas de radio 3,0 mm. "Raíz" con centro en
+  y = 8,0 entre z = 5 y z = 13 (pared en y = 5,0) y "corona" con centro en
+  y = 5,5 entre z = 15 y z = 25 (pared en y = 2,5), toda sobre la plataforma
+  del implante del caso 001 (z = 14). Prueba que la corona no cuenta (R-013).
 
 Este script NO escribe ningún esperado.json: los resultados esperados los
 calcula y escribe una persona.
@@ -98,10 +102,10 @@ def construir_canal_grueso() -> vtk.vtkPolyData:
     return _malla(puntos, np.array(triangulos))
 
 
-def construir_diente(centro_y: float) -> vtk.vtkPolyData:
+def construir_diente(centro_y: float, z_min: float = 5.0, z_max: float = 25.0) -> vtk.vtkPolyData:
     from nucleo_dental.implante import Implante
 
-    malla = Implante(diametro=2 * RADIO_DIENTE, largo=25.0 - 5.0, apice=[0.0, centro_y, 5.0],
+    malla = Implante(diametro=2 * RADIO_DIENTE, largo=z_max - z_min, apice=[0.0, centro_y, z_min],
                      eje=[0.0, 0.0, 1.0]).como_malla(lados=LADOS)
     # Anula los residuos de punto flotante (cos(3π/2) = -1.8e-16) para que el
     # vértice de la pared que mira al implante quede exacto.
@@ -188,6 +192,18 @@ def main() -> None:
         verificar(diente, np.pi * RADIO_DIENTE ** 2 * 20.0,
                   vertices_exactos=([0.0, centro_y - RADIO_DIENTE, 5.0],))
         escribir(diente, nombre)
+
+    print("diente_008.stl")
+    raiz = construir_diente(8.0, 5.0, 13.0)      # pared en y = 5,0; bajo la plataforma (z = 14)
+    corona = construir_diente(5.5, 15.0, 25.0)   # pared en y = 2,5; toda sobre la plataforma
+    union = vtk.vtkAppendPolyData()
+    union.AddInputData(raiz)
+    union.AddInputData(corona)
+    union.Update()
+    diente_008 = union.GetOutput()
+    verificar(diente_008, np.pi * RADIO_DIENTE ** 2 * (8.0 + 10.0),
+              vertices_exactos=([0.0, 5.0, 5.0], [0.0, 2.5, 15.0]))
+    escribir(diente_008, "diente_008.stl")
 
 
 if __name__ == "__main__":
