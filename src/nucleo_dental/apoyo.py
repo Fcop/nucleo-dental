@@ -101,6 +101,63 @@ def region_automatica(escaneo: vtk.vtkPolyData, dientes: vtk.vtkPolyData, punto_
     }
 
 
+def region_desde_curva(escaneo: vtk.vtkPolyData, puntos_curva, punto_interior=None) -> np.ndarray:
+    """Máscara del interior de una curva cerrada dibujada por puntos sobre el escaneo.
+
+    Los puntos se unen por el camino más corto sobre la malla (vtkSelectPolyData).
+    punto_interior indica de qué lado de la curva está la región; por defecto
+    el centro de los puntos de la curva. Los vértices sobre la curva se incluyen.
+    """
+    curva = np.atleast_2d(np.asarray(puntos_curva, dtype=float))
+    if curva.shape[0] < 3 or curva.shape[1] != 3:
+        raise ValueError("La curva cerrada necesita al menos 3 puntos (x, y, z).")
+    lazo = vtk.vtkPoints()
+    # Submuestreo: vtkSelectPolyData degrada con lazos muy densos (nota de malla_guia).
+    lazo.SetData(numpy_support.numpy_to_vtk(np.ascontiguousarray(curva[:: max(1, len(curva) // 400)]), deep=True))
+
+    seleccion = vtk.vtkSelectPolyData()
+    seleccion.SetInputData(escaneo)
+    seleccion.SetLoop(lazo)
+    seleccion.GenerateSelectionScalarsOn()
+    seleccion.SetSelectionModeToClosestPointRegion()
+    seleccion.SetClosestPoint(*(curva.mean(axis=0) if punto_interior is None else np.asarray(punto_interior, float)))
+    seleccion.Update()
+    escalares = seleccion.GetOutput().GetPointData().GetScalars()
+    if escalares is None:
+        raise ValueError("No se pudo delimitar la región: la curva no está pegada a la superficie del escaneo.")
+    # Convención de vtkSelectPolyData: negativo dentro, 0 sobre la curva.
+    mascara = numpy_support.vtk_to_numpy(escalares) <= _TOLERANCIA_MM
+    if not mascara.any():
+        raise ValueError("La región dentro de la curva quedó vacía.")
+    return mascara
+
+
+def leer_puntos_slicer(ruta) -> np.ndarray:
+    """Puntos de control (N×3, LPS) de un archivo de marcas de Slicer (.mrk.json).
+
+    Se respeta el sistema de coordenadas que declara el archivo; si no lo
+    declara no se adivina (RG-002).
+    """
+    import json
+    from pathlib import Path
+
+    ruta = Path(ruta)
+    if not ruta.is_file():
+        raise ValueError(f"No existe el archivo de puntos: {ruta}")
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))
+        marcas = datos["markups"][0]
+        puntos = np.array([c["position"] for c in marcas["controlPoints"]], dtype=float)
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError):
+        raise ValueError(f"{ruta} no es un archivo de marcas de Slicer válido (.mrk.json).") from None
+    sistema = marcas.get("coordinateSystem")
+    if sistema == "LPS":
+        return puntos
+    if sistema == "RAS":
+        return puntos * np.array([-1.0, -1.0, 1.0])
+    raise ValueError(f"{ruta}: falta coordinateSystem (LPS o RAS); no se adivina el sistema de coordenadas.")
+
+
 def parche_de_apoyo(escaneo: vtk.vtkPolyData, mascara: np.ndarray, solo_mayor: bool = False) -> vtk.vtkPolyData:
     """Parche abierto del escaneo con los triángulos cuyos tres vértices están en la región."""
     copia = vtk.vtkPolyData()

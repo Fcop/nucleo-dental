@@ -273,13 +273,10 @@ def extraer_parche(pd_hueso: vtk.vtkPolyData,
     region = numpy_support.vtk_to_numpy(
         pd.GetPointData().GetArray(ARRAY_REGION)) > 0.5
 
-    conectividad = numpy_support.vtk_to_numpy(pd.GetPolys().GetData())
-    if conectividad.size % 4 != 0:
-        raise RuntimeError("La malla no quedo triangulada tras vtkTriangleFilter.")
-    conectividad = conectividad.reshape(-1, 4)
-    if not (conectividad[:, 0] == 3).all():
-        raise RuntimeError("Se esperaban solo triangulos en la malla del hueso.")
-    triangulos = conectividad[:, 1:]
+    desplazamientos_celdas = numpy_support.vtk_to_numpy(pd.GetPolys().GetOffsetsArray())
+    if not (np.diff(desplazamientos_celdas) == 3).all():
+        raise RuntimeError("Se esperaban solo triangulos en la malla tras vtkTriangleFilter.")
+    triangulos = numpy_support.vtk_to_numpy(pd.GetPolys().GetConnectivityArray()).reshape(-1, 3)
 
     # solo celdas con SUS TRES puntos dentro de la region: deja el borde limpio
     dentro = region[triangulos].all(axis=1)

@@ -79,6 +79,153 @@ def test_encia_pegada_al_diente_no_se_confunde_con_diente():
     assert es_diente[pared].all()
 
 
+CASO_014 = CASOS_DORADOS / "apoyo" / "caso_014_curva_oclusal"
+
+
+def test_caso_dorado_014_curva_sobre_la_oclusal():
+    """Verifica R-016: una curva cuadrada de 4 x 4 mm sobre la oclusal encierra x 6-10, y -2..2 (16 mm²), sin paredes."""
+    from nucleo_dental.apoyo import parche_de_apoyo, region_desde_curva
+
+    caso = json.loads((CASO_014 / "caso.json").read_text(encoding="utf-8"))
+    esperado = json.loads((CASO_014 / "esperado.json").read_text(encoding="utf-8"))
+    escaneo = leer_stl(CASO_014 / caso["escaneo"])
+    mascara = region_desde_curva(escaneo, caso["curva"], caso["punto_interior"])
+    puntos = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData()).astype(float)
+    sel = puntos[mascara]
+    tol = esperado["tolerancia_mm"]
+
+    assert sel[:, 0].min() == pytest.approx(esperado["rango_x"][0], abs=tol)
+    assert sel[:, 0].max() == pytest.approx(esperado["rango_x"][1], abs=tol)
+    assert sel[:, 1].min() == pytest.approx(esperado["rango_y"][0], abs=tol)
+    assert sel[:, 1].max() == pytest.approx(esperado["rango_y"][1], abs=tol)
+    assert np.allclose(sel[:, 2], esperado["z"], atol=tol)          # sin paredes: todo en la oclusal
+    assert esperado["incluye_paredes"] is False
+
+    masa = vtk_mass(parche_de_apoyo(escaneo, mascara))
+    assert masa == pytest.approx(esperado["area_mm2"], abs=esperado["tolerancia_area_mm2"])
+
+
+def test_curva_puede_incluir_encia():
+    """Verifica R-016: en modo curva manda el usuario; una curva sobre la encía la incluye."""
+    from nucleo_dental.apoyo import region_desde_curva
+
+    escaneo = leer_stl(CASOS_DORADOS / "escaneo_arcada_recta.stl")
+    curva = [[-2, -6, 0], [2, -6, 0], [2, -4, 0], [-2, -4, 0]]
+    mascara = region_desde_curva(escaneo, curva, [0, -5, 0])
+    puntos = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData()).astype(float)
+    assert mascara.any()
+    assert np.allclose(puntos[mascara, 2], 0.0)
+
+
+def test_curva_con_menos_de_3_puntos_es_error():
+    """Verifica R-016: una curva cerrada necesita al menos 3 puntos."""
+    from nucleo_dental.apoyo import region_desde_curva
+
+    escaneo = leer_stl(CASOS_DORADOS / "escaneo_arcada_recta.stl")
+    with pytest.raises(ValueError, match="3 puntos"):
+        region_desde_curva(escaneo, [[0, 0, 8], [1, 0, 8]], [0.5, 0, 8])
+
+
+@pytest.mark.parametrize("sistema, factor", [("LPS", (1, 1, 1)), ("RAS", (-1, -1, 1))])
+def test_leer_curva_de_slicer_respeta_el_sistema(tmp_path, sistema, factor):
+    """Verifica R-016 y R-002: los puntos de un .mrk.json de Slicer se leen en LPS según el sistema que declara."""
+    from nucleo_dental.apoyo import leer_puntos_slicer
+
+    puntos = [[6, -2, 8], [10, -2, 8], [10, 2, 8]]
+    archivo = tmp_path / "curva.mrk.json"
+    archivo.write_text(json.dumps({"markups": [{
+        "type": "ClosedCurve", "coordinateSystem": sistema,
+        "controlPoints": [{"label": f"C-{i}", "position": [p * f for p, f in zip(pt, factor)]}
+                          for i, pt in enumerate(puntos)]}]}), encoding="utf-8")
+    np.testing.assert_allclose(leer_puntos_slicer(archivo), puntos)
+
+
+def test_leer_curva_sin_sistema_declarado_es_error(tmp_path):
+    """Verifica R-016 y R-002: sin coordinateSystem no se adivina RAS o LPS; es error."""
+    from nucleo_dental.apoyo import leer_puntos_slicer
+
+    archivo = tmp_path / "curva.mrk.json"
+    archivo.write_text(json.dumps({"markups": [{"type": "ClosedCurve",
+                                                "controlPoints": [{"position": [0, 0, 0]}]}]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="coordinateSystem"):
+        leer_puntos_slicer(archivo)
+
+
+def _implante_eje_x0(tmp_path):
+    """STL de un implante vertical con eje en x = 0, y = 0 (bajo la encía de la arcada recta)."""
+    import vtk
+
+    from nucleo_dental.implante import Implante
+
+    ruta = tmp_path / "implante.stl"
+    escritor = vtk.vtkSTLWriter()
+    escritor.SetInputData(Implante(4.1, 10.0, [0, 0, -12.0], [0, 0, 1]).como_malla())
+    escritor.SetFileName(str(ruta))
+    escritor.SetFileTypeToBinary()
+    escritor.Write()
+    return ruta
+
+
+def test_comando_apoyo_automatico(tmp_path):
+    """Verifica R-016 y R-007: `apoyo` automático guarda el parche, lo traza e informa la región (caso 012 con R = 20)."""
+    from test_medir import _sha256, ejecutar
+
+    salida_stl = tmp_path / "apoyo.stl"
+    codigo, salida, stderr = ejecutar(
+        "apoyo", "--escaneo", CASOS_DORADOS / "escaneo_arcada_recta.stl",
+        "--dientes", CASOS_DORADOS / "dientes_arcada_recta.stl",
+        "--implante-stl", _implante_eje_x0(tmp_path), "--apice-hacia", "abajo",
+        "--radio", "20", "--salida", salida_stl)
+    assert codigo == 0, stderr
+    a = salida["apoyo"]
+    assert a["modo"] == "automatico"
+    assert a["altura_minima_sobre_encia_mm"] == pytest.approx(1.0, abs=0.05)
+    assert a["area_mm2"] > 0
+    assert salida["parametros"]["radio_mm"] == 20.0
+    assert salida["parche"]["sha256"] == _sha256(salida_stl)
+
+
+def test_comando_apoyo_con_curva_de_slicer(tmp_path):
+    """Verifica R-016: `apoyo --curva` lee un .mrk.json (RAS) y delimita los 16 mm² del caso 014."""
+    from test_medir import ejecutar
+
+    caso = json.loads((CASO_014 / "caso.json").read_text(encoding="utf-8"))
+    curva = tmp_path / "curva.mrk.json"
+    curva.write_text(json.dumps({"markups": [{"type": "ClosedCurve", "coordinateSystem": "RAS", "controlPoints": [
+        {"position": [-p[0], -p[1], p[2]]} for p in caso["curva"]]}]}), encoding="utf-8")
+    codigo, salida, stderr = ejecutar(
+        "apoyo", "--escaneo", CASOS_DORADOS / "escaneo_arcada_recta.stl", "--curva", curva,
+        "--punto-interior", "8,0,8", "--salida", tmp_path / "apoyo.stl")
+    assert codigo == 0, stderr
+    assert salida["apoyo"]["modo"] == "curva"
+    assert salida["apoyo"]["area_mm2"] == pytest.approx(16.0, abs=0.5)
+
+
+@pytest.mark.parametrize("extra, texto",
+                         [([], "--curva"),
+                          (["--dientes", "X"], "--implante-stl"),
+                          (["--curva", "no_existe.mrk.json"], "No existe")],
+                         ids=["sin_modo", "automatico_sin_implante", "curva_inexistente"])
+def test_comando_apoyo_errores(extra, texto):
+    """Verifica R-008 y R-016: errores de entrada de `apoyo` devuelven 1 con mensaje claro."""
+    from test_medir import ejecutar
+
+    extra = [str(CASOS_DORADOS / "dientes_arcada_recta.stl") if e == "X" else e for e in extra]
+    codigo, salida, stderr = ejecutar("apoyo", "--escaneo", CASOS_DORADOS / "escaneo_arcada_recta.stl", *extra)
+    assert codigo == 1
+    assert salida is None
+    assert texto in stderr
+
+
+def vtk_mass(parche):
+    import vtk
+
+    masa = vtk.vtkMassProperties()
+    masa.SetInputData(parche)
+    masa.Update()
+    return masa.GetSurfaceArea()
+
+
 def test_radio_por_defecto_es_24_mm():
     """Verifica R-016: el radio por defecto del modo automático es 24 mm (decisión clínica 2026-10-08)."""
     from nucleo_dental.apoyo import RADIO_APOYO_POR_DEFECTO_MM

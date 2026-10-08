@@ -1,0 +1,5 @@
+{
+  "escaneo": "../../escaneo_arcada_recta.stl",
+  "curva": [[6, -2, 8], [10, -2, 8], [10, 2, 8], [6, 2, 8]],
+  "punto_interior": [8, 0, 8]
+}

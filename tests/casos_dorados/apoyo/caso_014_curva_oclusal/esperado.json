@@ -1,0 +1,10 @@
+{
+  "rango_x": [6, 10],
+  "rango_y": [-2, 2],
+  "z": 8,
+  "area_mm2": 16,
+  "incluye_paredes": false,
+  "tolerancia_mm": 0.05,
+  "tolerancia_area_mm2": 0.5,
+  "origen": "Calculado por Claude por delegación de Francisco (2026-10-08), con geometría analítica independiente del código: cuadrado de 4 x 4 mm sobre la cara oclusal plana."
+}

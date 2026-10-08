@@ -8,7 +8,11 @@
 
 Imprime un JSON con el resultado, los parámetros y la trazabilidad.
 Códigos de salida de `medir`: 0 = verde, 2 = rojo, 1 = error de entrada.
-Códigos de salida de `registrar`: 0 = registrado, 1 = error de entrada.
+    nucleo-dental apoyo --escaneo escaneo.stl (--dientes dientes.stl --implante-stl i.stl
+                        --apice-hacia abajo [--radio 24] [--margen-encia 1] | --curva curva.mrk.json)
+                        --salida apoyo.stl
+
+Códigos de salida de `registrar` y `apoyo`: 0 = hecho, 1 = error de entrada.
 """
 
 from __future__ import annotations
@@ -62,13 +66,13 @@ def main(argv=None) -> int:
         if args.comando is None:
             raise ErrorEntrada("falta el subcomando. Uso: nucleo-dental medir --caso ruta/caso.json "
                                "o nucleo-dental registrar --escaneo … --dientes …")
-        salida = _registrar(args) if args.comando == "registrar" else _medir(args)
+        salida = {"registrar": _registrar, "apoyo": _apoyo}.get(args.comando, _medir)(args)
     except (ErrorEntrada, ValueError) as error:
         print(f"Error de entrada: {error}", file=sys.stderr)
         return CODIGO_ERROR_ENTRADA
 
     print(json.dumps(salida, ensure_ascii=False, indent=2))
-    if args.comando == "registrar":
+    if args.comando in ("registrar", "apoyo"):
         return CODIGO_VERDE
     return CODIGO_VERDE if salida["resultado"]["semaforo"] == "verde" else CODIGO_ROJO
 
@@ -81,7 +85,7 @@ def _unir_vectores_negativos(argv: list[str]) -> list[str]:
     """
     resultado, i = [], 0
     while i < len(argv):
-        if argv[i] in ("--apice", "--eje", "--punto") and i + 1 < len(argv) and argv[i + 1].startswith("-"):
+        if argv[i] in ("--apice", "--eje", "--punto", "--punto-interior") and i + 1 < len(argv) and argv[i + 1].startswith("-"):
             resultado.append(f"{argv[i]}={argv[i + 1]}")
             i += 2
         else:
@@ -121,7 +125,84 @@ def _crear_parser() -> argparse.ArgumentParser:
     r.add_argument("--dientes", help="STL de los dientes segmentados del CBCT, en LPS.")
     r.add_argument("--punto", help="Punto x,y,z (LPS) donde informar cuánto mueve la corrección, p. ej. el ápice.")
     r.add_argument("--salida", help="Ruta donde guardar el escaneo registrado (STL).")
+
+    a = sub.add_parser("apoyo", help="Región de apoyo de la guía sobre el escaneo (automática o por curva).")
+    a.add_argument("--escaneo", help="STL del escaneo intraoral registrado con el CBCT, en LPS.")
+    a.add_argument("--dientes", help="Modo automático: STL de los dientes segmentados del CBCT, en LPS.")
+    a.add_argument("--implante-stl", help="Modo automático: STL del implante planificado (define el eje).")
+    a.add_argument("--apice-hacia", help="Modo automático: 'abajo' o 'arriba' (ver medir).")
+    a.add_argument("--radio", help="Modo automático: radio en mm desde el eje del implante (por defecto 24).")
+    a.add_argument("--margen-encia", help="Modo automático: distancia mínima a la encía en mm (por defecto 1).")
+    a.add_argument("--curva", help="Modo curva: curva cerrada dibujada en Slicer (.mrk.json, LPS o RAS declarado).")
+    a.add_argument("--punto-interior", help="Modo curva: punto x,y,z (LPS) dentro de la región; por defecto el centro de la curva.")
+    a.add_argument("--salida", help="Ruta donde guardar el parche de apoyo (STL).")
     return parser
+
+
+def _apoyo(args) -> dict:
+    """Subcomando `apoyo` (R-016)."""
+    import numpy as np
+    import vtk
+
+    from nucleo_dental.apoyo import (RADIO_APOYO_POR_DEFECTO_MM, leer_puntos_slicer, parche_de_apoyo,
+                                     region_automatica, region_desde_curva)
+
+    if args.escaneo is None:
+        raise ErrorEntrada("faltan parámetros: --escaneo")
+    ruta_escaneo = Path(args.escaneo)
+    escaneo = leer_stl(ruta_escaneo)
+    archivos = [ruta_escaneo]
+
+    if args.curva is not None:
+        ruta_curva = Path(args.curva)
+        puntos_curva = leer_puntos_slicer(ruta_curva)
+        interior = _vector(args.punto_interior, "--punto-interior") if args.punto_interior is not None else None
+        mascara = region_desde_curva(escaneo, puntos_curva, interior)
+        informe = {"modo": "curva", "puntos_curva": len(puntos_curva)}
+        parametros = {"curva": str(ruta_curva), "punto_interior": interior}
+        archivos.append(ruta_curva)
+    elif args.dientes is not None:
+        faltan = [f"--{n.replace('_', '-')}" for n in ("implante_stl", "apice_hacia") if getattr(args, n) is None]
+        if faltan:
+            raise ErrorEntrada("el modo automático necesita: " + ", ".join(faltan))
+        ruta_dientes, ruta_implante = Path(args.dientes), Path(args.implante_stl)
+        implante = Implante.desde_malla(leer_stl(ruta_implante), args.apice_hacia)
+        radio = RADIO_APOYO_POR_DEFECTO_MM if args.radio is None else _numero(args.radio, "--radio")
+        margen_encia = 1.0 if args.margen_encia is None else _numero(args.margen_encia, "--margen-encia")
+        region = region_automatica(escaneo, leer_stl(ruta_dientes), implante.apice, implante.eje,
+                                   radio_mm=radio, margen_encia_mm=margen_encia)
+        mascara = region["mascara"]
+        informe = {"modo": "automatico", "altura_minima_sobre_encia_mm": region["altura_minima_sobre_encia_mm"]}
+        parametros = {"dientes": str(ruta_dientes), "implante_stl": str(ruta_implante),
+                      "apice_hacia": args.apice_hacia, "radio_mm": radio, "margen_encia_mm": margen_encia}
+        archivos += [ruta_dientes, ruta_implante]
+    else:
+        raise ErrorEntrada("indica el modo: --curva curva.mrk.json, o --dientes con --implante-stl y --apice-hacia")
+
+    parche = parche_de_apoyo(escaneo, np.asarray(mascara))
+    masa = vtk.vtkMassProperties()
+    masa.SetInputData(parche)
+    masa.Update()
+    conectividad = vtk.vtkPolyDataConnectivityFilter()
+    conectividad.SetInputData(parche)
+    conectividad.SetExtractionModeToAllRegions()
+    conectividad.Update()
+    informe.update({"puntos_region": int(np.count_nonzero(mascara)), "area_mm2": float(masa.GetSurfaceArea()),
+                    "partes": int(conectividad.GetNumberOfExtractedRegions())})
+
+    salida = {"apoyo": informe,
+              "parametros": {"escaneo": str(ruta_escaneo), **parametros, "sistema_coordenadas": "LPS", "unidades": "mm"},
+              "trazabilidad": _trazabilidad(archivos)}
+    if args.salida is not None:
+        ruta_salida = Path(args.salida)
+        escritor = vtk.vtkSTLWriter()
+        escritor.SetInputData(parche)
+        escritor.SetFileName(str(ruta_salida))
+        escritor.SetFileTypeToBinary()
+        if not escritor.Write():
+            raise ErrorEntrada(f"no se pudo escribir {ruta_salida}")
+        salida["parche"] = {"ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)}
+    return salida
 
 
 def _registrar(args) -> dict:
