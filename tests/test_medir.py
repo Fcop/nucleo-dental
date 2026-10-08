@@ -262,6 +262,22 @@ def test_hueso_errores_de_entrada(extra, texto):
     assert texto in stderr
 
 
+def test_sobrefresado_por_parametro():
+    """Verifica R-017 y R-007: --sobrefresado 0.3 lleva el caso 001 de 2,5 a 2,2 mm (verde) y queda trazado."""
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--sobrefresado", "0.3", *ARGS_CASO_001)
+    assert salida is not None, stderr
+    assert salida["resultado"]["estructuras"]["canal"]["distancia_mm"] == pytest.approx(2.2, abs=0.05)
+    assert salida["parametros"]["sobrefresado_mm"] == 0.3
+    assert codigo == 0
+
+
+def test_sobrefresado_negativo_es_error():
+    """Verifica R-008 y R-017: un sobrefresado negativo es error de entrada (1)."""
+    codigo, _, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--sobrefresado", "-0.3", *ARGS_CASO_001)
+    assert codigo == 1
+    assert "sobrefresado" in stderr
+
+
 def test_codigos_salida():
     """Verifica R-008: 0 = verde, 2 = rojo."""
     assert ejecutar("medir", "--caso", CASOS_DORADOS / "caso_001" / "caso.json")[0] == 0

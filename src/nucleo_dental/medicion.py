@@ -24,6 +24,8 @@ ESTRUCTURAS_BAJO_PLATAFORMA = {"dientes"}
 MARGEN_HUESO_POR_DEFECTO_MM = 1.5
 # Estructuras que se evalúan por espesor alrededor del implante, no por distancia.
 ESTRUCTURAS_ESPESOR = {"hueso"}
+# Estructuras que se miden contra el lecho fresado, que pasa el ápice (R-017).
+ESTRUCTURAS_CON_SOBREFRESADO = {"canal"}
 _PASO_RAYOS_MM = 0.25        # separación de los rayos en altura y contorno, y paso grueso a lo largo
 _PASO_FINO_MM = 0.01         # resolución final del espesor
 _ESPESOR_MAXIMO_MM = 10.0    # más allá, el espesor se informa como 10 mm
@@ -302,17 +304,32 @@ def _cavidades_en_contacto(implante: Implante, cavidades: list) -> list:
     return contacto
 
 
-def evaluar_plan(implante: Implante, estructuras: dict) -> dict:
+def evaluar_plan(implante: Implante, estructuras: dict, sobrefresado_mm: float = 0.0) -> dict:
     """Evalúa el implante contra cada estructura con su propio margen (R-013).
 
     estructuras: {nombre: (malla, margen_mm)}, p. ej. {"canal": (..., 2.0), "dientes": (..., 1.5)}.
     Los dientes se evalúan solo bajo la plataforma (ver recortar_bajo_plataforma).
+    sobrefresado_mm: lo que la fresa pasa más allá del ápice (R-017). Para el
+    canal se mide contra el implante alargado hacia el ápice en esa longitud,
+    con el mismo diámetro (conservador: la punta real de la fresa es más fina).
     El semáforo global es rojo si alguna estructura está en rojo.
     """
     if not estructuras:
         raise ValueError("No hay ninguna estructura contra la cual evaluar el implante.")
+    sobrefresado_mm = float(sobrefresado_mm)
+    if not np.isfinite(sobrefresado_mm) or sobrefresado_mm < 0:
+        raise ValueError(f"El sobrefresado debe ser un número mayor o igual que 0 mm (se recibió {sobrefresado_mm}).")
+    fresado = implante if sobrefresado_mm == 0 else Implante(
+        implante.diametro, implante.largo + sobrefresado_mm,
+        implante.apice - sobrefresado_mm * implante.eje, implante.eje)
+
     por_estructura = {}
     for nombre, (malla, margen) in estructuras.items():
+        if nombre in ESTRUCTURAS_CON_SOBREFRESADO:
+            resultado = medir(fresado, malla, margen)
+            resultado.update({"margen_mm": float(margen), "sobrefresado_mm": sobrefresado_mm})
+            por_estructura[nombre] = resultado
+            continue
         if nombre in ESTRUCTURAS_ESPESOR:
             por_estructura[nombre] = espesor_oseo(implante, malla, margen)
             continue

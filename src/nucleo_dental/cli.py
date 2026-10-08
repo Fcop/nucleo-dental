@@ -33,7 +33,7 @@ CODIGO_ERROR_ENTRADA = 1
 CODIGO_ROJO = 2
 
 PARAMETROS_SUELTOS = ("canal", "diametro", "largo", "apice", "eje", "implante_stl", "apice_hacia", "margen",
-                      "dientes", "margen_dientes", "hueso", "margen_hueso")
+                      "dientes", "margen_dientes", "hueso", "margen_hueso", "sobrefresado")
 
 # Estructuras opcionales además del canal: nombre -> margen por defecto (mm).
 ESTRUCTURAS_OPCIONALES = {"dientes": MARGEN_DIENTES_POR_DEFECTO_MM, "hueso": MARGEN_HUESO_POR_DEFECTO_MM}
@@ -111,6 +111,8 @@ def _crear_parser() -> argparse.ArgumentParser:
     m.add_argument("--hueso", help="STL cerrado del hueso (p. ej. Mandible.stl), en LPS: agrega el espesor óseo "
                                    "mínimo alrededor de las paredes laterales del implante al semáforo.")
     m.add_argument("--margen-hueso", help=f"Espesor óseo mínimo en mm (por defecto {MARGEN_HUESO_POR_DEFECTO_MM}).")
+    m.add_argument("--sobrefresado", help="Lo que la fresa pasa más allá del ápice, en mm (por defecto 0); "
+                                          "se suma al medir contra el canal (R-017).")
     m.add_argument("--cbct", help="Carpeta con la serie DICOM del CBCT: verifica que canal e implante "
                                   "caigan dentro del volumen (detecta RAS/LPS mezclados). Requiere SimpleITK.")
 
@@ -167,6 +169,7 @@ def _medir(args) -> dict:
         if "stl" in especificacion:
             especificacion["stl"] = str(ruta_caso.parent / especificacion["stl"])
         margen = caso["margen"]
+        sobrefresado = caso.get("sobrefresado_mm", 0.0)
         opcionales = {n: (ruta_caso.parent / caso[n], caso.get(f"margen_{n}", defecto))
                       for n, defecto in ESTRUCTURAS_OPCIONALES.items() if n in caso}
         archivos = [ruta_caso, ruta_canal]
@@ -179,6 +182,7 @@ def _medir(args) -> dict:
             raise ErrorEntrada("faltan parámetros: --canal")
         ruta_canal = Path(args.canal)
         margen = MARGEN_POR_DEFECTO_MM if args.margen is None else _numero(args.margen, "--margen")
+        sobrefresado = 0.0 if args.sobrefresado is None else _numero(args.sobrefresado, "--sobrefresado")
         opcionales = _opcionales_desde_argumentos(args)
         archivos = [ruta_canal]
 
@@ -200,13 +204,14 @@ def _medir(args) -> dict:
         exigir_dentro_del_volumen(volumen, vertices, implante)
         cbct = volumen.descripcion()
 
-    parametros = {"canal": str(ruta_canal), "implante": implante_dict, "margen": margen}
+    parametros = {"canal": str(ruta_canal), "implante": implante_dict, "margen": margen,
+                  "sobrefresado_mm": sobrefresado}
     for nombre, (ruta, margen_opcional) in opcionales.items():
         parametros.update({nombre: str(ruta), f"margen_{nombre}": margen_opcional})
     parametros.update({"sistema_coordenadas": "LPS", "unidades": "mm"})
 
     salida = {
-        "resultado": evaluar_plan(implante, estructuras),
+        "resultado": evaluar_plan(implante, estructuras, sobrefresado_mm=sobrefresado),
         "parametros": parametros,
         "trazabilidad": _trazabilidad(archivos),
     }

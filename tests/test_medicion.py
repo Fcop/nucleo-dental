@@ -29,7 +29,9 @@ def _cargar_caso(carpeta: Path):
     if "hueso" in caso:
         estructuras["hueso"] = (leer_stl(carpeta / caso["hueso"]),
                                 caso.get("margen_hueso", MARGEN_HUESO_POR_DEFECTO_MM))
-    return implante, estructuras, leer_esperado(carpeta)
+    esperado = leer_esperado(carpeta)
+    esperado["sobrefresado_mm"] = caso.get("sobrefresado_mm", 0.0)   # opción del caso, no se compara
+    return implante, estructuras, esperado
 
 
 def test_hay_casos_dorados():
@@ -37,7 +39,28 @@ def test_hay_casos_dorados():
     assert [c.name for c in CARPETAS_DORADAS] == [
         "caso_001", "caso_002", "caso_003", "caso_004_eje_invertido", "caso_005_malla_gruesa",
         "caso_006_diente_verde", "caso_007_diente_rojo", "caso_008_corona_no_cuenta",
-        "caso_009_hueso_rojo", "caso_010_hueso_verde"]
+        "caso_009_hueso_rojo", "caso_010_hueso_verde", "caso_013_sobrefresado"]
+
+
+def test_sobrefresado_solo_afecta_al_canal():
+    """Verifica R-017: el sobrefresado alarga el implante hacia el ápice solo para medir contra el canal.
+
+    Caso 006 (diente a 1,95 mm de la pared) con sobrefresado 0,3: el canal pasa de 2,5 a 2,2 mm
+    y la distancia al diente no cambia.
+    """
+    implante, estructuras, _ = _cargar_caso(CASOS_DORADOS / "caso_006_diente_verde")
+    r = evaluar_plan(implante, estructuras, sobrefresado_mm=0.3)
+    assert r["estructuras"]["canal"]["distancia_mm"] == pytest.approx(2.2, abs=0.05)
+    assert r["estructuras"]["canal"]["sobrefresado_mm"] == 0.3
+    assert r["estructuras"]["dientes"]["distancia_mm"] == pytest.approx(1.95, abs=0.05)
+
+
+@pytest.mark.parametrize("valor", [-0.1, float("nan")], ids=["negativo", "nan"])
+def test_sobrefresado_invalido_se_rechaza(valor):
+    """Verifica R-017: el sobrefresado debe ser un número mayor o igual que 0."""
+    implante, estructuras, _ = _cargar_caso(CASOS_DORADOS / "caso_001")
+    with pytest.raises(ValueError, match="sobrefresado"):
+        evaluar_plan(implante, estructuras, sobrefresado_mm=valor)
 
 
 def test_margen_hueso_por_defecto_es_1_5_mm():
@@ -295,7 +318,7 @@ def test_canal_con_normales_invertidas_da_el_mismo_resultado(carpeta):
         invertir.Update()
         invertidas[nombre] = (invertir.GetOutput(), margen)
 
-    comparar(evaluar_plan(implante, invertidas), esperado)
+    comparar(evaluar_plan(implante, invertidas, sobrefresado_mm=esperado["sobrefresado_mm"]), esperado)
 
 
 @pytest.mark.parametrize("margen", [-1.0, float("nan")], ids=["negativo", "nan"])
@@ -309,4 +332,4 @@ def test_margen_invalido_se_rechaza(margen):
 def test_caso_dorado(carpeta):
     """Verifica R-002, R-004, R-005, R-006, R-009 y R-013 contra los resultados calculados a mano."""
     implante, estructuras, esperado = _cargar_caso(carpeta)
-    comparar(evaluar_plan(implante, estructuras), esperado)
+    comparar(evaluar_plan(implante, estructuras, sobrefresado_mm=esperado["sobrefresado_mm"]), esperado)
