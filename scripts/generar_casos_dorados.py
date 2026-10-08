@@ -10,6 +10,10 @@ x = -20 a x = 20 mm, centrados en y = 0, z = 0.
   con solo 8 vértices y 12 triángulos. Es la malla más gruesa posible: los
   vértices quedan a 20 mm del centro, lejos de cualquier implante, mientras
   las caras planas pasan cerca (RG-004).
+- diente_006.stl y diente_007.stl: raíz simplificada, cilindro vertical de
+  radio 3,0 mm entre z = 5 y z = 25, con 64 lados y centro en x = 0 e
+  y = 7,0 o y = 6,3. Hay un vértice exacto en la pared que mira al implante
+  (y = 4,0 y y = 3,3).
 
 Este script NO escribe ningún esperado.json: los resultados esperados los
 calcula y escribe una persona.
@@ -28,6 +32,7 @@ RADIO = 1.5
 LADOS = 64
 X_MIN, X_MAX = -20.0, 20.0
 PASO_X = 1.0
+RADIO_DIENTE = 3.0
 
 CARPETA = Path(__file__).resolve().parents[1] / "tests" / "casos_dorados"
 
@@ -91,6 +96,19 @@ def construir_canal_grueso() -> vtk.vtkPolyData:
     ]
     triangulos = [t for a, b, c, d in caras for t in ((a, b, c), (a, c, d))]
     return _malla(puntos, np.array(triangulos))
+
+
+def construir_diente(centro_y: float) -> vtk.vtkPolyData:
+    from nucleo_dental.implante import Implante
+
+    malla = Implante(diametro=2 * RADIO_DIENTE, largo=25.0 - 5.0, apice=[0.0, centro_y, 5.0],
+                     eje=[0.0, 0.0, 1.0]).como_malla(lados=LADOS)
+    # Anula los residuos de punto flotante (cos(3π/2) = -1.8e-16) para que el
+    # vértice de la pared que mira al implante quede exacto.
+    puntos = numpy_support.vtk_to_numpy(malla.GetPoints().GetData()).copy()
+    puntos[np.abs(puntos) < 1e-12] = 0.0
+    malla.GetPoints().SetData(numpy_support.numpy_to_vtk(puntos, deep=True))
+    return malla
 
 
 def _malla(puntos: np.ndarray, triangulos: np.ndarray) -> vtk.vtkPolyData:
@@ -163,6 +181,13 @@ def main() -> None:
     grueso = construir_canal_grueso()
     verificar(grueso, (2 * RADIO) ** 2 * largo)
     escribir(grueso, "canal_grueso.stl")
+
+    for nombre, centro_y in (("diente_006.stl", 7.0), ("diente_007.stl", 6.3)):
+        print(nombre)
+        diente = construir_diente(centro_y)
+        verificar(diente, np.pi * RADIO_DIENTE ** 2 * 20.0,
+                  vertices_exactos=([0.0, centro_y - RADIO_DIENTE, 5.0],))
+        escribir(diente, nombre)
 
 
 if __name__ == "__main__":

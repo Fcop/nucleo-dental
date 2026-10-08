@@ -69,12 +69,12 @@ def test_caso_real_contra_medicion_manual():
     esperado = json.loads((CASO / "esperado.json").read_text(encoding="utf-8"))
     codigo, salida, stderr = ejecutar("medir", "--caso", CASO / "caso.json", "--cbct", CASO / "DICOM")
     assert salida is not None, stderr
-    r = salida["resultado"]
+    r = salida["resultado"]["estructuras"]["canal"]
     tol = esperado["tolerancia_mm"]
     assert r["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=tol)
     assert r["colision"] is esperado["colision"]
     assert r["penetracion_mm"] == pytest.approx(esperado["penetracion_mm"], abs=tol)
-    assert r["semaforo"] == esperado["semaforo"]
+    assert salida["resultado"]["semaforo"] == esperado["semaforo"]
     assert codigo == esperado["codigo_salida"]
     assert salida["cbct"]["tamano"] == [601, 601, 601]
 
@@ -89,7 +89,7 @@ def test_caso_real_con_implante_stl():
         "medir", "--canal", CASO / "Mandibular canal.stl", "--implante-stl", CASO / "implante.stl",
         "--apice-hacia", "abajo", "--diametro", "4", "--largo", "8", "--cbct", CASO / "DICOM")
     assert salida is not None, stderr
-    assert salida["resultado"]["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=esperado["tolerancia_mm"])
+    assert salida["resultado"]["estructuras"]["canal"]["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=esperado["tolerancia_mm"])
     assert codigo == esperado["codigo_salida"]
     assert salida["parametros"]["implante"]["largo"] == pytest.approx(8.0, abs=0.01)
 

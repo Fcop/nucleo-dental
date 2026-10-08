@@ -1,0 +1,7 @@
+{
+  "canal": {"distancia_mm": 2.5, "colision": false, "penetracion_mm": 0, "semaforo": "verde"},
+  "dientes": {"distancia_mm": 1.25, "colision": false, "penetracion_mm": 0, "semaforo": "rojo"},
+  "semaforo": "rojo",
+  "codigo_salida": 2,
+  "tolerancia_mm": 0.05
+}

@@ -22,13 +22,14 @@ from pathlib import Path
 from vtk.util import numpy_support
 
 from nucleo_dental.implante import Implante
-from nucleo_dental.medicion import MARGEN_POR_DEFECTO_MM, leer_stl, medir
+from nucleo_dental.medicion import MARGEN_DIENTES_POR_DEFECTO_MM, MARGEN_POR_DEFECTO_MM, evaluar_plan, leer_stl
 
 CODIGO_VERDE = 0
 CODIGO_ERROR_ENTRADA = 1
 CODIGO_ROJO = 2
 
-PARAMETROS_SUELTOS = ("canal", "diametro", "largo", "apice", "eje", "implante_stl", "apice_hacia", "margen")
+PARAMETROS_SUELTOS = ("canal", "diametro", "largo", "apice", "eje", "implante_stl", "apice_hacia", "margen",
+                      "dientes", "margen_dientes")
 
 # Diferencia admitida entre las medidas declaradas y las del STL del implante
 # (R-012, decisión clínica 2026-10-08).
@@ -93,7 +94,10 @@ def _crear_parser() -> argparse.ArgumentParser:
                                           "--diametro y --largo, si se indican, se contrastan con el STL.")
     m.add_argument("--apice-hacia", help="Con --implante-stl: 'abajo' (ápice inferior, mandíbula) o 'arriba' "
                                          "(ápice superior, maxilar).")
-    m.add_argument("--margen", help=f"Margen en mm (por defecto {MARGEN_POR_DEFECTO_MM}).")
+    m.add_argument("--margen", help=f"Margen al canal en mm (por defecto {MARGEN_POR_DEFECTO_MM}).")
+    m.add_argument("--dientes", help="STL cerrado de los dientes (p. ej. segmentación de la arcada), en LPS: "
+                                     "agrega la distancia a los dientes al semáforo.")
+    m.add_argument("--margen-dientes", help=f"Margen a los dientes en mm (por defecto {MARGEN_DIENTES_POR_DEFECTO_MM}).")
     m.add_argument("--cbct", help="Carpeta con la serie DICOM del CBCT: verifica que canal e implante "
                                   "caigan dentro del volumen (detecta RAS/LPS mezclados). Requiere SimpleITK.")
     return parser
@@ -112,6 +116,8 @@ def _medir(args) -> dict:
         if "stl" in especificacion:
             especificacion["stl"] = str(ruta_caso.parent / especificacion["stl"])
         margen = caso["margen"]
+        ruta_dientes = ruta_caso.parent / caso["dientes"] if "dientes" in caso else None
+        margen_dientes = caso.get("margen_dientes", MARGEN_DIENTES_POR_DEFECTO_MM)
         archivos = [ruta_caso, ruta_canal]
     else:
         if not sueltos:
@@ -120,35 +126,41 @@ def _medir(args) -> dict:
         especificacion = _implante_desde_argumentos(args)
         if args.canal is None:
             raise ErrorEntrada("faltan parámetros: --canal")
+        if args.margen_dientes is not None and args.dientes is None:
+            raise ErrorEntrada("--margen-dientes solo se usa junto con --dientes")
         ruta_canal = Path(args.canal)
         margen = MARGEN_POR_DEFECTO_MM if args.margen is None else _numero(args.margen, "--margen")
+        ruta_dientes = Path(args.dientes) if args.dientes is not None else None
+        margen_dientes = (MARGEN_DIENTES_POR_DEFECTO_MM if args.margen_dientes is None
+                          else _numero(args.margen_dientes, "--margen-dientes"))
         archivos = [ruta_canal]
 
     implante, implante_dict = _construir_implante(especificacion)
     if "stl" in implante_dict:
         archivos.append(Path(implante_dict["stl"]))
-    canal = leer_stl(ruta_canal)
+    estructuras = {"canal": (leer_stl(ruta_canal), margen)}
+    if ruta_dientes is not None:
+        estructuras["dientes"] = (leer_stl(ruta_dientes), margen_dientes)
+        archivos.append(ruta_dientes)
 
     cbct = None
     if args.cbct is not None:
         from nucleo_dental.cbct import exigir_dentro_del_volumen, leer_cbct
 
         volumen = leer_cbct(args.cbct)
-        vertices = numpy_support.vtk_to_numpy(canal.GetPoints().GetData())
+        vertices = {nombre: numpy_support.vtk_to_numpy(malla.GetPoints().GetData())
+                    for nombre, (malla, _) in estructuras.items()}
         exigir_dentro_del_volumen(volumen, vertices, implante)
         cbct = volumen.descripcion()
 
-    resultado = medir(implante, canal, margen)
+    parametros = {"canal": str(ruta_canal), "implante": implante_dict, "margen": margen}
+    if ruta_dientes is not None:
+        parametros.update({"dientes": str(ruta_dientes), "margen_dientes": margen_dientes})
+    parametros.update({"sistema_coordenadas": "LPS", "unidades": "mm"})
 
     salida = {
-        "resultado": resultado,
-        "parametros": {
-            "canal": str(ruta_canal),
-            "implante": implante_dict,
-            "margen": margen,
-            "sistema_coordenadas": "LPS",
-            "unidades": "mm",
-        },
+        "resultado": evaluar_plan(implante, estructuras),
+        "parametros": parametros,
         "trazabilidad": _trazabilidad(archivos),
     }
     if cbct is not None:

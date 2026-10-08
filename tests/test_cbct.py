@@ -81,7 +81,7 @@ def test_dentro_del_volumen_mide_y_reporta_el_cbct(tmp_path):
                                 tamano=(20, 10, 15))
     codigo, salida, stderr = medir_con_cbct(CANAL_RECTO, "0,0,4", cbct)
     assert codigo == 0, stderr
-    assert salida["resultado"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
+    assert salida["resultado"]["estructuras"]["canal"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
 
     c = salida["cbct"]
     assert c["tamano"] == [20, 10, 15]

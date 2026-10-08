@@ -26,26 +26,34 @@ _Evitar_: orientación, dirección de inserción
 Superficie cerrada que delimita el conducto del nervio alveolar inferior.
 _Evitar_: nervio (cuando se habla de la geometría), conducto dentario
 
+**Dientes**:
+Superficie cerrada de los dientes segmentados de la arcada (corona y raíz); el diente vecino al implante es el que importa para la seguridad.
+_Evitar_: raíces (como estructura), piezas
+
+**Estructura**:
+Cada anatomía contra la que se evalúa el implante (canal mandibular, dientes), con su propio margen.
+_Evitar_: objeto, órgano, malla (cuando se habla del concepto clínico)
+
 ## Evaluación de seguridad
 
 **Distancia**:
-Separación mínima medida entre la superficie del implante y la del canal mandibular; nunca es negativa y vale 0 cuando hay colisión.
+Separación mínima medida entre la superficie del implante y la de una estructura; nunca es negativa y vale 0 cuando hay colisión.
 _Evitar_: margen, holgura, distancia de seguridad
 
 **Margen**:
-Distancia mínima que el clínico exige entre implante y canal mandibular para aceptar un plan; es una regla, no una medición.
+Distancia mínima que el clínico exige entre el implante y una estructura para aceptar un plan; es una regla, no una medición. Cada estructura tiene el suyo (canal 2,0 mm, dientes 1,5 mm).
 _Evitar_: distancia de seguridad, distancia, zona de seguridad
 
 **Colisión**:
-Situación en que el implante y el canal mandibular comparten volumen o se tocan.
+Situación en que el implante y una estructura comparten volumen o se tocan.
 _Evitar_: choque, contacto, intersección
 
 **Penetración**:
-Profundidad máxima a la que el implante se mete en el canal mandibular, medida desde la pared del canal; vale 0 si no hay colisión.
+Profundidad máxima a la que el implante se mete en una estructura, medida desde su pared; vale 0 si no hay colisión.
 _Evitar_: distancia negativa, invasión
 
 **Semáforo**:
-Veredicto del plan: verde si la distancia alcanza el margen, rojo si no lo alcanza o si hay colisión.
+Veredicto por estructura: verde si la distancia alcanza su margen, rojo si no lo alcanza o si hay colisión. El semáforo global del plan es rojo si alguna estructura es roja.
 _Evitar_: alerta, estado, resultado
 
 **Sobrefresado**:

@@ -80,13 +80,14 @@ def leer_cbct(carpeta) -> VolumenCBCT:
     )
 
 
-def exigir_dentro_del_volumen(volumen: VolumenCBCT, vertices_canal, implante) -> None:
-    """Error de entrada si algún vértice del canal o el ápice o la plataforma caen fuera del CBCT."""
+def exigir_dentro_del_volumen(volumen: VolumenCBCT, vertices_por_estructura: dict, implante) -> None:
+    """Error de entrada si algún vértice de las estructuras (canal, dientes…), el ápice o la plataforma caen fuera del CBCT."""
     problemas = []
 
-    fuera = ~volumen.contiene(vertices_canal)
-    if fuera.any():
-        problemas.append(f"{int(fuera.sum())} de {len(fuera)} vértices del canal")
+    for nombre, vertices in vertices_por_estructura.items():
+        fuera = ~volumen.contiene(vertices)
+        if fuera.any():
+            problemas.append(f"{int(fuera.sum())} de {len(fuera)} vértices de {nombre}")
 
     extremos = {"ápice": implante.apice, "plataforma": implante.plataforma}
     for nombre, dentro in zip(extremos, volumen.contiene(np.array(list(extremos.values())))):

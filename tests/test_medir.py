@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from dorados import CARPETAS_DORADAS, CASOS_DORADOS, leer_esperado
+
 RAIZ = Path(__file__).resolve().parents[1]
-CASOS_DORADOS = RAIZ / "tests" / "casos_dorados"
-CARPETAS_DORADAS = sorted(p.parent for p in CASOS_DORADOS.glob("*/esperado.json"))
 CANAL_RECTO = CASOS_DORADOS / "canal_recto.stl"
 
 _SCRIPTS = Path(sys.executable).parent
@@ -35,16 +35,20 @@ def _sha256(ruta: Path) -> str:
 
 @pytest.mark.parametrize("carpeta", CARPETAS_DORADAS, ids=lambda c: c.name)
 def test_caso_dorado_con_el_comando(carpeta):
-    """Verifica R-002, R-004, R-005, R-006, R-008 y R-009 con el comando real sobre cada caso dorado."""
-    esperado = json.loads((carpeta / "esperado.json").read_text(encoding="utf-8"))
+    """Verifica R-002, R-004, R-005, R-006, R-008, R-009 y R-013 con el comando real sobre cada caso dorado."""
+    esperado = leer_esperado(carpeta)
     codigo, salida, stderr = ejecutar("medir", "--caso", carpeta / "caso.json")
     assert salida is not None, stderr
     r = salida["resultado"]
     tol = esperado["tolerancia_mm"]
 
-    assert r["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=tol)
-    assert r["colision"] is esperado["colision"]
-    assert r["penetracion_mm"] == pytest.approx(esperado["penetracion_mm"], abs=tol)
+    assert set(r["estructuras"]) == set(esperado["estructuras"])
+    for nombre, e in esperado["estructuras"].items():
+        obtenido = r["estructuras"][nombre]
+        assert obtenido["distancia_mm"] == pytest.approx(e["distancia_mm"], abs=tol), nombre
+        assert obtenido["colision"] is e["colision"], nombre
+        assert obtenido["penetracion_mm"] == pytest.approx(e["penetracion_mm"], abs=tol), nombre
+        assert obtenido["semaforo"] == e["semaforo"], nombre
     assert r["semaforo"] == esperado["semaforo"]
     assert codigo == esperado["codigo_salida"]
 
@@ -85,7 +89,7 @@ def test_parametros_sueltos_equivalen_al_caso():
         "medir", "--canal", CANAL_RECTO, "--diametro", 4.1, "--largo", 10,
         "--apice", "0,0,4", "--eje", "0,0,1")
     assert salida is not None, stderr
-    assert salida["resultado"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
+    assert salida["resultado"]["estructuras"]["canal"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
     assert salida["parametros"]["margen"] == 2.0
     assert codigo == 0
     assert [Path(a["ruta"]).resolve() for a in salida["trazabilidad"]["archivos_entrada"]] == [CANAL_RECTO.resolve()]
@@ -103,7 +107,7 @@ def test_coordenadas_negativas(forma):
         "medir", "--canal", CANAL_RECTO, "--diametro", 4.1, "--largo", 10, *apice, *eje)
     assert salida is not None, stderr
     assert salida["parametros"]["implante"]["eje"] == [0, 0, -1]
-    assert salida["resultado"]["colision"] is True
+    assert salida["resultado"]["estructuras"]["canal"]["colision"] is True
     assert codigo == 2
 
 
@@ -125,7 +129,7 @@ def test_implante_stl_equivale_a_parametros(tmp_path):
     stl = _escribir_implante_stl(tmp_path / "implante.stl")
     codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--implante-stl", stl, "--apice-hacia", "abajo")
     assert salida is not None, stderr
-    assert salida["resultado"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
+    assert salida["resultado"]["estructuras"]["canal"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
     assert codigo == 0
 
     imp = salida["parametros"]["implante"]
@@ -164,7 +168,7 @@ def test_implante_stl_desde_caso_json(tmp_path):
                                 "margen": 2.0}), encoding="utf-8")
     codigo, salida, stderr = ejecutar("medir", "--caso", caso)
     assert salida is not None, stderr
-    assert salida["resultado"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
+    assert salida["resultado"]["estructuras"]["canal"]["distancia_mm"] == pytest.approx(2.5, abs=0.05)
     assert codigo == 0
 
 
@@ -182,6 +186,49 @@ def test_implante_stl_errores_de_entrada(tmp_path, extra, texto):
     stl = str(_escribir_implante_stl(tmp_path / "implante.stl"))
     argumentos = [stl if a == "IMPLANTE" else a for a in extra]
     codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, *argumentos)
+    assert codigo == 1
+    assert salida is None
+    assert texto in stderr
+
+
+DIENTE_007 = CASOS_DORADOS / "diente_007.stl"
+ARGS_CASO_001 = ["--diametro", "4.1", "--largo", "10", "--apice", "0,0,4", "--eje", "0,0,1"]
+
+
+def test_dientes_con_parametros_sueltos():
+    """Verifica R-013 y R-007: --dientes agrega la estructura, se traza su STL y el margen por defecto es 1,5 mm."""
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--dientes", DIENTE_007, *ARGS_CASO_001)
+    assert salida is not None, stderr
+    dientes = salida["resultado"]["estructuras"]["dientes"]
+    assert dientes["distancia_mm"] == pytest.approx(1.25, abs=0.05)
+    assert dientes["margen_mm"] == 1.5
+    assert salida["resultado"]["semaforo"] == "rojo"
+    assert codigo == 2
+    assert salida["parametros"]["dientes"] == str(DIENTE_007)
+    assert salida["parametros"]["margen_dientes"] == 1.5
+    rutas = {Path(a["ruta"]).resolve() for a in salida["trazabilidad"]["archivos_entrada"]}
+    assert DIENTE_007.resolve() in rutas
+
+
+def test_margen_dientes_configurable():
+    """Verifica R-013: con --margen-dientes 1.0, el diente a 1,25 mm pasa a verde (y el global también)."""
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, "--dientes", DIENTE_007,
+                                      "--margen-dientes", "1.0", *ARGS_CASO_001)
+    assert salida is not None, stderr
+    assert salida["resultado"]["estructuras"]["dientes"]["semaforo"] == "verde"
+    assert codigo == 0
+
+
+@pytest.mark.parametrize(
+    "extra, texto",
+    [(["--dientes", DIENTE_007, "--margen-dientes", "-1"], "margen"),
+     (["--margen-dientes", "1.0"], "--dientes"),
+     (["--dientes", "no_existe.stl"], "No existe")],
+    ids=["margen_negativo", "margen_sin_dientes", "dientes_inexistente"],
+)
+def test_dientes_errores_de_entrada(extra, texto):
+    """Verifica R-008 y R-013: errores con --dientes devuelven 1 con mensaje claro."""
+    codigo, salida, stderr = ejecutar("medir", "--canal", CANAL_RECTO, *extra, *ARGS_CASO_001)
     assert codigo == 1
     assert salida is None
     assert texto in stderr

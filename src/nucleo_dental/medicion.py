@@ -15,6 +15,8 @@ from vtk.util import numpy_support
 from nucleo_dental.implante import Implante
 
 MARGEN_POR_DEFECTO_MM = 2.0
+# Margen implante–diente vecino (RP-001 → R-013, decisión clínica 2026-10-07).
+MARGEN_DIENTES_POR_DEFECTO_MM = 1.5
 
 # Separación entre puntos muestreados sobre el implante. Con 0,05 mm el error
 # de muestreo queda bajo los 0,05 mm que exige R-004.
@@ -105,6 +107,23 @@ def medir(implante: Implante, malla_canal: vtk.vtkPolyData,
         "penetracion_mm": penetracion,
         "semaforo": "rojo" if colision or distancia < margen else "verde",
     }
+
+
+def evaluar_plan(implante: Implante, estructuras: dict) -> dict:
+    """Evalúa el implante contra cada estructura con su propio margen (R-013).
+
+    estructuras: {nombre: (malla, margen_mm)}, p. ej. {"canal": (..., 2.0), "dientes": (..., 1.5)}.
+    El semáforo global es rojo si alguna estructura está en rojo.
+    """
+    if not estructuras:
+        raise ValueError("No hay ninguna estructura contra la cual evaluar el implante.")
+    por_estructura = {}
+    for nombre, (malla, margen) in estructuras.items():
+        resultado = medir(implante, malla, margen)
+        resultado["margen_mm"] = float(margen)
+        por_estructura[nombre] = resultado
+    rojo = any(r["semaforo"] == "rojo" for r in por_estructura.values())
+    return {"semaforo": "rojo" if rojo else "verde", "estructuras": por_estructura}
 
 
 def _penetracion(implante, malla_canal, distancia_al_canal, d_superficie) -> float:

@@ -1,35 +1,70 @@
-"""Medición implante–canal mandibular (R-004, R-005, R-006, R-009).
+"""Medición implante–estructuras: canal mandibular y dientes (R-004, R-005, R-006, R-009, R-013).
 
 Los resultados esperados vienen de tests/casos_dorados/*/esperado.json y de
 valores calculados a mano por Francisco. Este archivo nunca los modifica.
 """
 
-import json
 from pathlib import Path
 
 import pytest
 
+from dorados import CARPETAS_DORADAS, CASOS_DORADOS, leer_caso, leer_esperado
 from nucleo_dental.implante import Implante
-from nucleo_dental.medicion import leer_stl, medir
+from nucleo_dental.medicion import MARGEN_DIENTES_POR_DEFECTO_MM, evaluar_plan, leer_stl, medir
 
-CASOS_DORADOS = Path(__file__).parent / "casos_dorados"
 CANAL_RECTO = CASOS_DORADOS / "canal_recto.stl"
-CARPETAS_DORADAS = sorted(p.parent for p in CASOS_DORADOS.glob("*/esperado.json"))
 
 
 def _cargar_caso(carpeta: Path):
-    caso = json.loads((carpeta / "caso.json").read_text(encoding="utf-8"))
-    esperado = json.loads((carpeta / "esperado.json").read_text(encoding="utf-8"))
+    """Implante, estructuras {nombre: (malla, margen)} y resultado esperado de un caso dorado."""
+    caso = leer_caso(carpeta)
     imp = caso["implante"]
     implante = Implante(imp["diametro"], imp["largo"], imp["apice"], imp["eje"])
-    canal = leer_stl(carpeta / caso["canal"])
-    return implante, canal, caso["margen"], esperado
+    estructuras = {"canal": (leer_stl(carpeta / caso["canal"]), caso["margen"])}
+    if "dientes" in caso:
+        estructuras["dientes"] = (leer_stl(carpeta / caso["dientes"]),
+                                  caso.get("margen_dientes", MARGEN_DIENTES_POR_DEFECTO_MM))
+    return implante, estructuras, leer_esperado(carpeta)
+
+
+def _comparar(resultado: dict, esperado: dict):
+    tol = esperado["tolerancia_mm"]
+    assert set(resultado["estructuras"]) == set(esperado["estructuras"])
+    for nombre, e in esperado["estructuras"].items():
+        r = resultado["estructuras"][nombre]
+        assert r["distancia_mm"] == pytest.approx(e["distancia_mm"], abs=tol), nombre
+        assert r["colision"] is e["colision"], nombre
+        assert r["penetracion_mm"] == pytest.approx(e["penetracion_mm"], abs=tol), nombre
+        assert r["semaforo"] == e["semaforo"], nombre
+    assert resultado["semaforo"] == esperado["semaforo"]
 
 
 def test_hay_casos_dorados():
-    """Verifica R-004: existen los casos dorados escritos a mano (005 = malla gruesa, RG-004)."""
+    """Verifica R-004 y R-013: existen los casos dorados escritos a mano (005 = malla gruesa; 006-007 = dientes)."""
     assert [c.name for c in CARPETAS_DORADAS] == [
-        "caso_001", "caso_002", "caso_003", "caso_004_eje_invertido", "caso_005_malla_gruesa"]
+        "caso_001", "caso_002", "caso_003", "caso_004_eje_invertido", "caso_005_malla_gruesa",
+        "caso_006_diente_verde", "caso_007_diente_rojo"]
+
+
+def test_margen_dientes_por_defecto_es_1_5_mm():
+    """Verifica R-013: el margen a los dientes por defecto es 1,5 mm (RP-001)."""
+    assert MARGEN_DIENTES_POR_DEFECTO_MM == 1.5
+
+
+def test_semaforo_global_es_rojo_si_alguna_estructura_es_roja():
+    """Verifica R-013: canal verde (2,5 mm) y dientes rojos (1,25 mm) dan semáforo global rojo (caso 007)."""
+    implante, estructuras, _ = _cargar_caso(CASOS_DORADOS / "caso_007_diente_rojo")
+    r = evaluar_plan(implante, estructuras)
+    assert r["estructuras"]["canal"]["semaforo"] == "verde"
+    assert r["estructuras"]["dientes"]["semaforo"] == "rojo"
+    assert r["semaforo"] == "rojo"
+    assert r["estructuras"]["dientes"]["margen_mm"] == 1.5
+
+
+def test_evaluar_plan_exige_al_menos_una_estructura():
+    """Verifica R-013: sin estructuras no hay nada que evaluar; es error, no verde."""
+    with pytest.raises(ValueError, match="estructura"):
+        evaluar_plan(_implante_caso_001(), {})
 
 
 def _implante_caso_001() -> Implante:
@@ -114,17 +149,16 @@ def test_canal_con_normales_invertidas_da_el_mismo_resultado(carpeta):
     """Verifica R-004 y R-005: el resultado no depende de la orientación de los triángulos del STL."""
     import vtk
 
-    implante, canal, margen, esperado = _cargar_caso(carpeta)
-    invertir = vtk.vtkReverseSense()
-    invertir.SetInputData(canal)
-    invertir.ReverseCellsOn()
-    invertir.Update()
+    implante, estructuras, esperado = _cargar_caso(carpeta)
+    invertidas = {}
+    for nombre, (malla, margen) in estructuras.items():
+        invertir = vtk.vtkReverseSense()
+        invertir.SetInputData(malla)
+        invertir.ReverseCellsOn()
+        invertir.Update()
+        invertidas[nombre] = (invertir.GetOutput(), margen)
 
-    r = medir(implante, invertir.GetOutput(), margen)
-    tol = esperado["tolerancia_mm"]
-    assert r["colision"] is esperado["colision"]
-    assert r["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=tol)
-    assert r["penetracion_mm"] == pytest.approx(esperado["penetracion_mm"], abs=tol)
+    _comparar(evaluar_plan(implante, invertidas), esperado)
 
 
 @pytest.mark.parametrize("margen", [-1.0, float("nan")], ids=["negativo", "nan"])
@@ -136,12 +170,6 @@ def test_margen_invalido_se_rechaza(margen):
 
 @pytest.mark.parametrize("carpeta", CARPETAS_DORADAS, ids=lambda c: c.name)
 def test_caso_dorado(carpeta):
-    """Verifica R-002, R-004, R-005, R-006 y R-009 contra los resultados calculados a mano."""
-    implante, canal, margen, esperado = _cargar_caso(carpeta)
-    r = medir(implante, canal, margen)
-    tol = esperado["tolerancia_mm"]
-
-    assert r["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=tol)
-    assert r["colision"] is esperado["colision"]
-    assert r["penetracion_mm"] == pytest.approx(esperado["penetracion_mm"], abs=tol)
-    assert r["semaforo"] == esperado["semaforo"]
+    """Verifica R-002, R-004, R-005, R-006, R-009 y R-013 contra los resultados calculados a mano."""
+    implante, estructuras, esperado = _cargar_caso(carpeta)
+    _comparar(evaluar_plan(implante, estructuras), esperado)

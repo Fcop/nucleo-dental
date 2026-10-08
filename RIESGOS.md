@@ -13,5 +13,5 @@
 | RG-006 | Cambio de API de VTK altera resultados | Error silencioso | vtk fijado <9.7; numpy fijado <2.5; casos dorados en cada cambio |
 | RG-007 | Penetración en el canal leída como holgura, o sin gravedad visible | Plan inseguro aceptado, o corrección insuficiente | R-009: penetración en campo propio, nunca como distancia positiva; casos 003-004 |
 | RG-008 | La fresa sobrepasa el ápice y el margen se mide solo contra el implante | Distancia real al nervio menor que la reportada | RP-003 (pendiente, ligado al kit); mientras tanto, considerar el sobrefresado al elegir la posición |
-| RG-009 | Raíz del diente vecino no considerada en v0.0.1 | Lesión radicular sin alerta | RP-001 (pendiente); en v0.0.1 la cercanía al diente se revisa manualmente |
+| RG-009 | Raíz del diente vecino no considerada | Lesión radicular sin alerta | R-013 con --dientes (casos 006-007). Riesgo residual: si no se entrega la segmentación de dientes, no se evalúa; la salida solo lista las estructuras recibidas |
 | RG-010 | STL del canal con normales invertidas o canal abierto | Punto dentro del canal leído como fuera: colisión no detectada | Reorientación automática de normales antes de medir; canal abierto se rechaza; test_canal_con_normales_invertidas_da_el_mismo_resultado, test_canal_abierto_se_rechaza |
