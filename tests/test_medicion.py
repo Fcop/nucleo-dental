@@ -40,10 +40,10 @@ def _comparar(resultado: dict, esperado: dict):
 
 
 def test_hay_casos_dorados():
-    """Verifica R-004 y R-013: existen los casos dorados escritos a mano (005 = malla gruesa; 006-007 = dientes)."""
+    """Verifica R-004 y R-013: existen los casos dorados escritos a mano (005 = malla gruesa; 006-008 = dientes)."""
     assert [c.name for c in CARPETAS_DORADAS] == [
         "caso_001", "caso_002", "caso_003", "caso_004_eje_invertido", "caso_005_malla_gruesa",
-        "caso_006_diente_verde", "caso_007_diente_rojo"]
+        "caso_006_diente_verde", "caso_007_diente_rojo", "caso_008_corona_no_cuenta"]
 
 
 def test_margen_dientes_por_defecto_es_1_5_mm():

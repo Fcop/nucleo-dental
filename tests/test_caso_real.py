@@ -4,7 +4,6 @@ Los datos NO están en el repositorio (.gitignore, regla 8 de CLAUDE.md): son
 locales. Sin la carpeta, estos tests se saltan.
 """
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -57,40 +56,49 @@ def test_modelo_real_se_lee_y_es_cerrado(modelo):
 
 
 @pytest.mark.skipif(not (CASO / "esperado.json").is_file(), reason="sin medición manual de referencia")
+def _comparar_con_medicion_manual(salida, codigo):
+    from dorados import leer_esperado
+
+    esperado = leer_esperado(CASO)
+    tol = esperado["tolerancia_mm"]
+    for nombre, e in esperado["estructuras"].items():
+        r = salida["resultado"]["estructuras"][nombre]
+        assert r["distancia_mm"] == pytest.approx(e["distancia_mm"], abs=tol), nombre
+        assert r["colision"] is e["colision"], nombre
+        assert r["penetracion_mm"] == pytest.approx(e["penetracion_mm"], abs=tol), nombre
+        assert r["semaforo"] == e["semaforo"], nombre
+    assert salida["resultado"]["semaforo"] == esperado["semaforo"]
+    assert codigo == esperado["codigo_salida"]
+
+
+@pytest.mark.skipif(not (CASO / "esperado.json").is_file(), reason="sin medición manual de referencia")
 def test_caso_real_contra_medicion_manual():
-    """Verifica R-004, R-010 y R-011: el comando completo con --cbct reproduce la medición manual en Slicer.
+    """Verifica R-004, R-010, R-011 y R-013: el comando completo con --cbct reproduce las mediciones manuales en Slicer.
 
     Implante planificado en 3D Slicer (D 4 mm, L 8 mm, inclinado ~10°) sobre el
-    canal derecho. Referencia: distancia mínima medida a mano, 2,330 mm, desde el
-    borde anterior del ápice; desde el centro del ápice la regla daba 2,733 mm.
+    canal derecho. Referencias medidas a mano: canal 2,330 mm desde el borde
+    anterior del ápice (desde el centro daba 2,733); dientes 7,529 mm al
+    premolar bajo la plataforma (a la corona del molar daba 5,95-6,43).
     """
     from test_medir import ejecutar
 
-    esperado = json.loads((CASO / "esperado.json").read_text(encoding="utf-8"))
     codigo, salida, stderr = ejecutar("medir", "--caso", CASO / "caso.json", "--cbct", CASO / "DICOM")
     assert salida is not None, stderr
-    r = salida["resultado"]["estructuras"]["canal"]
-    tol = esperado["tolerancia_mm"]
-    assert r["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=tol)
-    assert r["colision"] is esperado["colision"]
-    assert r["penetracion_mm"] == pytest.approx(esperado["penetracion_mm"], abs=tol)
-    assert salida["resultado"]["semaforo"] == esperado["semaforo"]
-    assert codigo == esperado["codigo_salida"]
+    _comparar_con_medicion_manual(salida, codigo)
     assert salida["cbct"]["tamano"] == [601, 601, 601]
 
 
 @pytest.mark.skipif(not (CASO / "esperado.json").is_file(), reason="sin medición manual de referencia")
 def test_caso_real_con_implante_stl():
-    """Verifica R-011 y R-012: leyendo el implante desde su STL se reproduce la medición manual (2,330 mm)."""
+    """Verifica R-011, R-012 y R-013: leyendo el implante desde su STL se reproducen las mediciones manuales."""
     from test_medir import ejecutar
 
-    esperado = json.loads((CASO / "esperado.json").read_text(encoding="utf-8"))
     codigo, salida, stderr = ejecutar(
-        "medir", "--canal", CASO / "Mandibular canal.stl", "--implante-stl", CASO / "implante.stl",
-        "--apice-hacia", "abajo", "--diametro", "4", "--largo", "8", "--cbct", CASO / "DICOM")
+        "medir", "--canal", CASO / "Mandibular canal.stl", "--dientes", CASO / "Lower Teeth.stl",
+        "--implante-stl", CASO / "implante.stl", "--apice-hacia", "abajo", "--diametro", "4", "--largo", "8",
+        "--cbct", CASO / "DICOM")
     assert salida is not None, stderr
-    assert salida["resultado"]["estructuras"]["canal"]["distancia_mm"] == pytest.approx(esperado["distancia_mm"], abs=esperado["tolerancia_mm"])
-    assert codigo == esperado["codigo_salida"]
+    _comparar_con_medicion_manual(salida, codigo)
     assert salida["parametros"]["implante"]["largo"] == pytest.approx(8.0, abs=0.01)
 
 
