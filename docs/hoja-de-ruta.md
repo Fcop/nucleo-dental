@@ -38,4 +38,5 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 ## Etapa 5 — Aplicación ☐
 
 - ☐ Interfaz PySide6: asistente guiado y modo experto, delgada sobre el motor
+- ☐ Segmentación automática de CBCT (canal, mandíbula, dientes) con [SlicerDentalSegmentator](https://github.com/gaudot/SlicerDentalSegmentator) (nnU-Net). Código Apache 2.0; falta revisar la licencia de los pesos del modelo. Sus salidas deben pasar los mismos chequeos (LPS, malla cerrada, R-010)
 - ☐ Servidor MCP que envuelva el motor, sin lógica nueva (al final)
