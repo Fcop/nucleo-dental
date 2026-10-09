@@ -413,12 +413,22 @@ def contar_bucles_borde(pd: vtk.vtkPolyData) -> int:
 # ---------------------------------------------------------------------------
 
 def parche_a_solido(parche: vtk.vtkPolyData,
-                    grosor: float) -> vtk.vtkPolyData:
+                    grosor: float,
+                    desfase: float = 0.0,
+                    suavizado_normales: int = 0) -> vtk.vtkPolyData:
     """Convierte un parche abierto en un solido cerrado de grosor constante.
 
-        intrados  el parche original, con winding invertido
-        extrados  el parche desplazado `grosor` a lo largo de las normales
+        intrados  el parche desplazado `desfase` a lo largo de las normales,
+                  con winding invertido
+        extrados  el parche desplazado `desfase + grosor`
         costillas dos triangulos por arista de borde, cosiendo ambas capas
+
+    Las normales se calculan una sola vez, sobre el parche original, y ambas
+    capas se desplazan con ellas. Recalcularlas sobre una capa ya desplazada
+    las invierte donde esa capa se pliega (concavidades de radio menor que el
+    desplazamiento), y la extrusion se mete en el tejido (RG-017).
+    `suavizado_normales` promedia cada normal con las de sus vecinos esa
+    cantidad de veces, para que el ruido del escaneo no abra aletas en el borde.
 
     Como intrados y extrados comparten numeracion de puntos, el cosido es
     exacto y no depende de reordenar el bucle de borde.
@@ -429,6 +439,8 @@ def parche_a_solido(parche: vtk.vtkPolyData,
     """
     if grosor <= 0:
         raise ValueError("El grosor debe ser positivo.")
+    if desfase < 0:
+        raise ValueError("El desfase debe ser mayor o igual que 0.")
 
     parche = _normales(parche, auto_orientar=False)
 
@@ -439,23 +451,21 @@ def parche_a_solido(parche: vtk.vtkPolyData,
             "indicar agujeros interiores en la seleccion: usa el pincel en "
             "modo aditivo para cerrarlos." % n_bucles)
 
-    # extrados: desplazamiento a lo largo de la normal
-    parche.GetPointData().SetActiveVectors("Normals")
-    warp = vtk.vtkWarpVector()
-    warp.SetInputData(parche)
-    warp.SetScaleFactor(float(grosor))
-    warp.Update()
-    externo = warp.GetOutput()
-
     # Vectorizado con numpy (regla 6): sin bucles Python sobre puntos ni caras.
     n_pts = parche.GetNumberOfPoints()
-    coordenadas = np.vstack([numpy_support.vtk_to_numpy(parche.GetPoints().GetData()),
-                             numpy_support.vtk_to_numpy(externo.GetPoints().GetData())]).astype(float)
-
     desplazamientos_celdas = numpy_support.vtk_to_numpy(parche.GetPolys().GetOffsetsArray())
     conectividad = numpy_support.vtk_to_numpy(parche.GetPolys().GetConnectivityArray())
     es_triangulo = np.diff(desplazamientos_celdas) == 3
     triangulos = np.stack([conectividad[desplazamientos_celdas[:-1][es_triangulo] + k] for k in range(3)], axis=1)
+
+    base = numpy_support.vtk_to_numpy(parche.GetPoints().GetData()).astype(float)
+    normales = numpy_support.vtk_to_numpy(parche.GetPointData().GetNormals()).astype(float)
+    for _ in range(int(suavizado_normales)):
+        suma = normales.copy()
+        for k in range(3):   # cada vertice recibe las normales de los otros dos vertices de cada triangulo
+            np.add.at(suma, triangulos[:, k], normales[triangulos[:, (k + 1) % 3]] + normales[triangulos[:, (k + 2) % 3]])
+        normales = suma / np.linalg.norm(suma, axis=1, keepdims=True)
+    coordenadas = np.vstack([base + desfase * normales, base + (desfase + grosor) * normales])
     intrados = triangulos[:, ::-1]                 # winding invertido: la normal sale del sólido
     extrados = triangulos + n_pts                  # winding original, desplazado
 

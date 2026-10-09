@@ -18,6 +18,11 @@ from nucleo_dental.kits import PerfilKit
 # El orificio se prolonga más allá del anillo para atravesar toda la guía
 # (anillo, puente y apoyo) al restarlo.
 _PROLONGACION_ORIFICIO_MM = 20.0
+# Pasadas de promedio de normales del puente: quita el ruido del escaneo sin
+# perder la forma de la encía (caso real: 0 puntos en el hueso con 0 a 40).
+_SUAVIZADO_NORMALES = 10
+# Pasadas de alisado del contorno del puente (solo vértices del borde).
+_PASADAS_BORDE = 10
 
 
 def geometria_orificio(implante: Implante, kit: PerfilKit, fabricacion: str) -> dict:
@@ -100,10 +105,12 @@ def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabri
     mascara = (~es_diente) & (radial <= alcance)
     encia = _orientar_hacia(parche_de_apoyo(escaneo, mascara, solo_mayor=True), implante.eje)
     cresta = _cruce_del_eje(encia, implante, np.array(g["cara_superior"]))
-    mascara &= _hasta_profundidad(puntos, cresta, implante.eje, kit.profundidad_puente_mm)
+    mascara &= _margen_de_profundidad(puntos, cresta, implante.eje, kit.profundidad_puente_mm) >= 0
     encia = _orientar_hacia(parche_de_apoyo(escaneo, mascara, solo_mayor=True), implante.eje)
-    piso = _desplazar(encia, holgura) if holgura > 0 else encia
-    puente = parche_a_solido(piso, kit.espesor_plantilla_mm)
+    encia = _alisar_borde(encia, _PASADAS_BORDE)
+    # Holgura y espesor con las mismas normales, calculadas sobre la encía (RG-017).
+    puente = parche_a_solido(encia, kit.espesor_plantilla_mm, desfase=holgura,
+                             suavizado_normales=_SUAVIZADO_NORMALES)
 
     piso_en_eje = cresta + holgura * implante.eje
     techo_en_eje = piso_en_eje + kit.espesor_plantilla_mm * implante.eje
@@ -152,10 +159,47 @@ def _cruce_del_eje(superficie, implante: Implante, hasta) -> np.ndarray:
     return np.array(cortes.GetPoint(0))
 
 
-def _hasta_profundidad(puntos, cresta, eje, profundidad_mm: float) -> np.ndarray:
-    """True por cada punto que no está más de `profundidad_mm` bajo la cresta, a lo largo del eje."""
+def _alisar_borde(parche, pasadas: int):
+    """Parche con su contorno alisado: quita la escalera de triángulos enteros del borde.
+
+    Solo se mueven los vértices del borde, cada uno hacia el promedio de sus dos
+    vecinos de borde (Taubin: avanza y retrocede para no encoger el contorno).
+    El interior, que es la superficie de apoyo, queda intacto; por eso el borde
+    nunca trepa por el diente vecino.
+    """
+    import vtk
+    from vtk.util import numpy_support
+
+    triangulos = numpy_support.vtk_to_numpy(parche.GetPolys().GetConnectivityArray()).reshape(-1, 3)
+    aristas = np.sort(np.vstack([triangulos[:, [0, 1]], triangulos[:, [1, 2]], triangulos[:, [2, 0]]]), axis=1)
+    unicas, veces = np.unique(aristas, axis=0, return_counts=True)
+    borde = unicas[veces == 1]
+    if len(borde) == 0:
+        return parche
+    puntos = numpy_support.vtk_to_numpy(parche.GetPoints().GetData()).astype(float)
+    vecinos = np.bincount(borde.ravel(), minlength=len(puntos)).astype(float)
+    en_borde = vecinos > 0
+    for _ in range(pasadas):
+        for factor in (0.5, -0.53):
+            suma = np.zeros_like(puntos)
+            np.add.at(suma, borde[:, 0], puntos[borde[:, 1]])
+            np.add.at(suma, borde[:, 1], puntos[borde[:, 0]])
+            paso = np.zeros_like(puntos)
+            paso[en_borde] = suma[en_borde] / vecinos[en_borde, None] - puntos[en_borde]
+            puntos = puntos + factor * paso
+    salida = vtk.vtkPolyData()
+    salida.DeepCopy(parche)
+    salida.GetPoints().SetData(numpy_support.numpy_to_vtk(puntos, deep=True))
+    return salida
+
+
+def _margen_de_profundidad(puntos, cresta, eje, profundidad_mm: float) -> np.ndarray:
+    """Cuánto le falta a cada punto (mm) para quedar `profundidad_mm` bajo la cresta, a lo largo del eje.
+
+    Positivo: el punto está dentro del límite; negativo: más profundo.
+    """
     u = np.asarray(eje, float) / np.linalg.norm(eje)
-    return (np.asarray(puntos, float) - np.asarray(cresta, float)) @ u >= -profundidad_mm
+    return (np.asarray(puntos, float) - np.asarray(cresta, float)) @ u + profundidad_mm
 
 
 def _orientar_hacia(parche, direccion):
@@ -175,23 +219,6 @@ def _orientar_hacia(parche, direccion):
     invertir.Update()
     salida = vtk.vtkPolyData()
     salida.DeepCopy(invertir.GetOutput())
-    return salida
-
-
-def _desplazar(parche, distancia: float):
-    """Copia del parche desplazada `distancia` a lo largo de sus normales."""
-    import vtk
-
-    from nucleo_dental.geometria.malla_guia import _normales
-
-    con_normales = _normales(parche)
-    con_normales.GetPointData().SetActiveVectors("Normals")
-    warp = vtk.vtkWarpVector()
-    warp.SetInputData(con_normales)
-    warp.SetScaleFactor(float(distancia))
-    warp.Update()
-    salida = vtk.vtkPolyData()
-    salida.DeepCopy(warp.GetOutput())
     return salida
 
 

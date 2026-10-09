@@ -31,6 +31,8 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ Perfil de kit configurable y anillo guía con orificio (R-018): OneGuide; caso dorado 015
 - ✅ Puente sobre la brecha y columna del orificio (R-019): caso dorado 016; caso real generado para revisión visual
 - ✅ Tipos de soporte (dento, dentomuco, muco), profundidad del puente (6 mm) y alivio configurables (R-020)
+- ✅ Corrección del puente (RG-017): holgura y espesor con las mismas normales (ya no entra en el hueso) y contorno alisado
+- ☐ Límites de la guía definidos por el usuario con la curva cerrada por puntos (decisión 2026-10-09): la generación automática siempre los necesita; lo automático queda como propuesta inicial que el usuario ajusta
 - ☐ Eje de inserción, eliminación de undercuts y tolerancia de ajuste
 - ☐ Validación geométrica y exportación de STL imprimible
 

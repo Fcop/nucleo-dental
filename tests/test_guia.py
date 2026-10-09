@@ -130,6 +130,71 @@ def test_parche_a_solido_cuadrado_plano():
     assert abs(z[1] - z[0]) == pytest.approx(3.0)
 
 
+def test_holgura_y_espesor_no_entran_en_la_encia():
+    """Verifica R-019 (RG-017): sobre un surco de encía más angosto que la holgura, ningún punto del puente queda bajo la encía.
+
+    Antes la holgura se aplicaba primero y las normales se recalculaban sobre la capa
+    desplazada: en el surco esa capa se pliega, las normales se invierten y el espesor
+    se extruía hacia el tejido (en el caso real llegó 1,7 mm dentro del hueso).
+    """
+    from nucleo_dental.geometria.malla_guia import parche_a_solido
+
+    def encia(x):
+        return -3.0 * np.exp(-(x / 0.6) ** 2)          # surco de 3 mm de hondo y ~1,2 mm de ancho
+
+    plano = vtk.vtkPlaneSource()
+    plano.SetOrigin(-6, -4, 0)
+    plano.SetPoint1(6, -4, 0)
+    plano.SetPoint2(-6, 4, 0)
+    plano.SetResolution(120, 40)
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(plano.GetOutputPort())
+    tri.Update()
+    superficie = tri.GetOutput()
+    puntos = numpy_support.vtk_to_numpy(superficie.GetPoints().GetData())
+    puntos[:, 2] = encia(puntos[:, 0])
+    superficie.GetPoints().Modified()
+
+    solido = parche_a_solido(superficie, 3.0, desfase=1.0, suavizado_normales=10)
+    p = numpy_support.vtk_to_numpy(solido.GetPoints().GetData())
+    assert (p[:, 2] - encia(p[:, 0])).min() >= 1.0 - 1e-6           # todo queda al menos a la holgura
+    assert _cerrada(solido)
+
+
+def test_alisar_borde_quita_la_escalera_sin_tocar_el_interior():
+    """Verifica R-019: el contorno del puente se alisa (borde más corto, sin escalera) y la superficie de apoyo no se mueve."""
+    from nucleo_dental.apoyo import parche_de_apoyo
+    from nucleo_dental.geometria.malla_guia import _aristas_borde_con_ids
+    from nucleo_dental.guia import _alisar_borde
+
+    plano = vtk.vtkPlaneSource()
+    plano.SetOrigin(-10, -10, 0)
+    plano.SetPoint1(10, -10, 0)
+    plano.SetPoint2(-10, 10, 0)
+    plano.SetResolution(40, 40)
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(plano.GetOutputPort())
+    tri.Update()
+    puntos = numpy_support.vtk_to_numpy(tri.GetOutput().GetPoints().GetData())
+    parche = parche_de_apoyo(tri.GetOutput(), np.linalg.norm(puntos[:, :2], axis=1) <= 7.0)   # círculo en escalera
+
+    def largo_borde(malla):
+        aristas = _aristas_borde_con_ids(malla)
+        p = numpy_support.vtk_to_numpy(aristas.GetPoints().GetData())
+        lineas = numpy_support.vtk_to_numpy(aristas.GetLines().GetConnectivityArray()).reshape(-1, 2)
+        return np.linalg.norm(p[lineas[:, 0]] - p[lineas[:, 1]], axis=1).sum()
+
+    alisado = _alisar_borde(parche, 10)
+    antes = numpy_support.vtk_to_numpy(parche.GetPoints().GetData())
+    despues = numpy_support.vtk_to_numpy(alisado.GetPoints().GetData())
+    movidos = np.linalg.norm(despues - antes, axis=1) > 1e-9
+    assert largo_borde(alisado) < 0.85 * largo_borde(parche)       # la escalera mide ~4/π del círculo
+    assert movidos.sum() <= len(numpy_support.vtk_to_numpy(_aristas_borde_con_ids(parche).GetPoints().GetData()))
+    assert np.abs(despues[:, 2]).max() < 1e-9                       # sigue sobre la superficie plana
+    radio = np.linalg.norm(despues[movidos, :2], axis=1)
+    assert radio.min() > 6.0 and radio.max() < 7.5                  # el contorno no encoge ni se va
+
+
 def test_caso_dorado_016_puente_y_columna():
     """Verifica R-019: piso del puente 1 mm sobre la encía, techo a 3 mm, columna hasta la cara superior (8,5), alto 4,5."""
     from nucleo_dental.guia import puente_y_columna
@@ -215,7 +280,8 @@ def test_mucosoportada_no_necesita_dientes():
                          tipo_soporte="mucosoportada", radio_mucosa_mm=10.0)
     zp = np.array(r["puente"].GetBounds())
     np.testing.assert_allclose(zp[4:], [0.0, 3.0], atol=0.05)
-    assert zp[1] - zp[0] == pytest.approx(20.0, abs=0.6)          # radio 10 alrededor del eje
+    # radio 10 alrededor del eje: el alisado del borde lo retrae menos de una celda (0,5 mm) por lado
+    assert 19.0 <= zp[1] - zp[0] <= 20.0 + 1e-6
 
 
 def test_dentosoportada_necesita_dientes():
@@ -241,11 +307,12 @@ def test_alivio_configurable():
 
 def test_limitar_profundidad():
     """Verifica R-020: solo quedan los puntos hasta 6 mm bajo la cresta, medidos a lo largo del eje."""
-    from nucleo_dental.guia import _hasta_profundidad
+    from nucleo_dental.guia import _margen_de_profundidad
 
     puntos = np.array([[0, 0, 0], [0, 5, -5.9], [0, 6, -6.1], [0, 8, -10]], dtype=float)
-    mascara = _hasta_profundidad(puntos, cresta=[0, 0, 0], eje=[0, 0, 1], profundidad_mm=6.0)
-    assert mascara.tolist() == [True, True, False, False]
+    margen = _margen_de_profundidad(puntos, cresta=[0, 0, 0], eje=[0, 0, 1], profundidad_mm=6.0)
+    np.testing.assert_allclose(margen, [6.0, 0.1, -0.1, -4.0], atol=1e-9)
+    assert (margen >= 0).tolist() == [True, True, False, False]
 
 
 def test_perfil_tiene_profundidad_y_alivio():
