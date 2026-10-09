@@ -134,8 +134,14 @@ def holgura_sobre_encia(escaneo, dientes, holgura_mm: float) -> np.ndarray:
 
 def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos=(),
               espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM,
-              volumen_minimo_pieza_mm3: float = VOLUMEN_MINIMO_PIEZA_MM3) -> dict:
+              volumen_minimo_pieza_mm3: float = VOLUMEN_MINIMO_PIEZA_MM3,
+              holgura_por_vertice=None) -> dict:
     """Une los positivos, aplica tolerancia y desbloqueo por el eje, resta los negativos y valida.
+
+    `holgura_por_vertice` (mm, un valor por vértice del escaneo, p. ej. la
+    holgura sobre la encía) sube la separación mínima a máx(T, holgura) en
+    cada lugar, para TODAS las piezas: la base plana de la columna también
+    respeta la holgura donde la encía sube hacia un lado.
 
     positivos, negativos: sólidos cerrados (vtkPolyData). Devuelve {"guia",
     "valida", "problemas", "metricas", ...}. Una guía no válida se devuelve
@@ -171,12 +177,18 @@ def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos
                                   lejos=_LEJOS_MM)
 
     union = np.max([campo(p) for p in positivos_z], axis=0)
-    dilatado = campo(escaneo_z, cerca_fuera_mm=tolerancia_mm + 2 * espaciado_mm) + tolerancia_mm
+    holgura_max = 0.0 if holgura_por_vertice is None else float(np.max(holgura_por_vertice))
+    d_escaneo = campo(escaneo_z, cerca_fuera_mm=max(tolerancia_mm, holgura_max) + 2 * espaciado_mm)
+    dilatado = d_escaneo + tolerancia_mm
+    separacion = np.full_like(d_escaneo, tolerancia_mm)
+    if holgura_max > tolerancia_mm:
+        separacion = _separacion_por_nodo(escaneo_z, holgura_por_vertice, d_escaneo, origen, espaciado_mm,
+                                          tolerancia_mm, holgura_max)
     # Sombra: máximo de `dilatado` en los nodos estrictamente por encima (eje 0 de la grilla = z).
     acumulado = np.maximum.accumulate(dilatado[::-1], axis=0)[::-1]
     sombra = np.full_like(dilatado, -_LEJOS_MM)
     sombra[:-1] = acumulado[1:]
-    f = np.minimum.reduce([union, -dilatado, -sombra] + [-campo(n) for n in negativos_z])
+    f = np.minimum.reduce([union, -(d_escaneo + separacion), -sombra] + [-campo(n) for n in negativos_z])
 
     guia_z = tl._superficie(f, origen, espaciado_mm)
     if guia_z.GetNumberOfPoints() == 0:
@@ -196,6 +208,23 @@ def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos
         "tolerancia_mm": float(tolerancia_mm),
         "espaciado_mm": float(espaciado_mm),
     }
+
+
+def _separacion_por_nodo(escaneo, holgura_por_vertice, d_escaneo, origen, espaciado: float,
+                         tolerancia: float, holgura_max: float) -> np.ndarray:
+    """Separación mínima en cada nodo: máx(T, holgura del vértice del escaneo más cercano).
+
+    Solo se interpola en los nodos cercanos al escaneo, que son los únicos
+    donde el término puede ser el mínimo.
+    """
+    from nucleo_dental.geometria.ajuste import _valor_del_vertice_mas_cercano
+
+    separacion = np.full_like(d_escaneo, tolerancia)
+    cerca = np.abs(d_escaneo) <= holgura_max + 3 * espaciado
+    k, j, i = np.nonzero(cerca)                                   # la grilla es (z, y, x)
+    nodos = np.column_stack([i, j, k]) * espaciado + np.asarray(origen, dtype=float)
+    separacion[cerca] = np.maximum(tolerancia, _valor_del_vertice_mas_cercano(escaneo, holgura_por_vertice, nodos))
+    return separacion
 
 
 def guia_quirurgica(escaneo, dientes, implante: Implante, kit: PerfilKit, fabricacion: str, mascara_apoyo,
@@ -229,11 +258,25 @@ def guia_quirurgica(escaneo, dientes, implante: Implante, kit: PerfilKit, fabric
     _, orificio = anillo_y_orificio(implante, kit, fabricacion)
     negativos = [orificio] + ([pc["alivio"]] if pc["alivio"] is not None else [])
     resultado = ensamblar(positivos, escaneo, eje_insercion, kit.tolerancia_ajuste(fabricacion),
-                          negativos=negativos, espaciado_mm=espaciado_mm)
+                          negativos=negativos, espaciado_mm=espaciado_mm, holgura_por_vertice=por_vertice)
     resultado.update({"puente_y_columna": {k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")},
                       "tipo_soporte": tipo_soporte, "con_puente": con_puente, "holgura_encia_mm": holgura,
                       "fabricacion": fabricacion, "kit": kit.nombre})
+    _agregar_ajuste(resultado, escaneo, kit.tolerancia_ajuste(fabricacion), por_vertice)
     return resultado
+
+
+def _agregar_ajuste(resultado: dict, escaneo, tolerancia_mm: float, holgura_por_vertice) -> None:
+    """Informe de ajuste (R-022): una interferencia con el escaneo invalida la guía."""
+    from nucleo_dental.geometria.ajuste import analizar_ajuste
+
+    ajuste = analizar_ajuste(resultado["guia"], escaneo, tolerancia_mm, holgura_por_vertice)
+    resultado["ajuste"] = ajuste
+    if not ajuste["sin_interferencia"]:
+        resultado["valida"] = False
+        resultado["problemas"].append(
+            "La guía invade el escaneo hasta %.2f mm (%.1f %% de la cara de asiento): no va a asentar."
+            % (ajuste["interferencia_max_mm"], ajuste["pct_interferencia"]))
 
 
 def _limpiar_piezas(malla, volumen_minimo_mm3: float):

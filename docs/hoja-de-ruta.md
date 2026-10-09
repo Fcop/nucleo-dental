@@ -36,7 +36,7 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ Ensamblaje (R-021): eje de inserción normal al plano oclusal (3 puntos), recorte de undercuts, tolerancia de ajuste por fabricación, resta del orificio, validación y exportación STL; comando `nucleo-dental guia`; caso dorado 017
 - ✅ `guia` en el caso real con la curva CC y el plano oclusal de Francisco: válida en dento y dentomucosoportada (eje de inserción a 18,2° del implante)
 - ✅ Carcasa desde la curva sin puente; holgura de 1 mm sobre la encía solo en dentosoportada
-- ☐ Informe de ajuste guía–escaneo antes de imprimir (portar `ajuste.py` del módulo GuiaCorte)
+- ✅ Informe de ajuste guía–escaneo antes de imprimir (R-022): objetivo por punto, histograma y mapa .vtp; una interferencia invalida la guía. Pendiente: confirmar el desvío aceptable (0,10 mm provisional)
 - ☐ Guías de varios implantes: una columna, orificio y alivio por implante, en el mismo ensamblaje (prioridad alta)
 - ☐ Ventanas de inspección para verificar el asiento de la guía (negativos sobre los dientes)
 - ☐ Pines de fijación al hueso, con su dirección y su camisa (clave en dentomuco y mucosoportada)

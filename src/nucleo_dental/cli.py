@@ -19,6 +19,8 @@ Códigos de salida de `medir`: 0 = verde, 2 = rojo, 1 = error de entrada.
 Códigos de salida de `registrar` y `apoyo`: 0 = hecho, 1 = error de entrada.
 Códigos de salida de `guia`: 0 = guía válida (se escribe --salida), 2 = guía no
 válida (se escribe solo como <salida>_NO_VALIDA.stl para inspeccionarla), 1 = error de entrada.
+`guia` escribe además <salida>_ajuste.vtp: la guía con la separación al escaneo por
+punto (Desvio_mm), para colorearla en Slicer; el histograma va a la salida de error.
 """
 
 from __future__ import annotations
@@ -203,12 +205,26 @@ def _guia(args) -> dict:
     if not escritor.Write():
         raise ErrorEntrada(f"no se pudo escribir {ruta_salida}")
 
+    from nucleo_dental.geometria.ajuste import histograma_ajuste, mapa_de_ajuste
+
+    ruta_mapa = ruta_salida.with_name(ruta_salida.stem + "_ajuste.vtp")
+    escritor_mapa = vtk.vtkXMLPolyDataWriter()
+    escritor_mapa.SetInputData(mapa_de_ajuste(r["guia"], r["ajuste"]))
+    escritor_mapa.SetFileName(str(ruta_mapa))
+    if not escritor_mapa.Write():
+        raise ErrorEntrada(f"no se pudo escribir {ruta_mapa}")
+    print(histograma_ajuste(r["ajuste"]), file=sys.stderr)
+    ajuste = {k: v for k, v in r["ajuste"].items() if not k.startswith("_")}
+    ajuste["mapa"] = {"ruta": str(ruta_mapa.resolve()), "sha256": _sha256(ruta_mapa),
+                      "escalar": "Desvio_mm (separación − objetivo; negativo = más apretado)"}
+
     pc = r["puente_y_columna"]
     angulo = float(np.degrees(np.arccos(np.clip(abs(np.dot(eje, implante.eje)), -1.0, 1.0))))
     archivos = [rutas["escaneo"], rutas["implante_stl"], rutas["curva"], rutas["plano_oclusal"]]
     return {
         "guia": {"valida": r["valida"], "problemas": r["problemas"],
                  "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
+        "ajuste": ajuste,
         "geometria": {"eje_insercion": r["eje_insercion"], "angulo_eje_implante_grados": angulo,
                       "tolerancia_ajuste_mm": r["tolerancia_mm"], **pc},
         "parametros": {**{n: str(v) for n, v in rutas.items()}, "dientes": str(ruta_dientes) if ruta_dientes else None,
