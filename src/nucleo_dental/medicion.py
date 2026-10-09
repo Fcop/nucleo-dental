@@ -12,7 +12,7 @@ import numpy as np
 import vtk
 from vtk.util import numpy_support
 
-from nucleo_dental.implante import Implante
+from nucleo_dental.implante import TOLERANCIA_SUPERFICIE_MM, Implante
 
 MARGEN_POR_DEFECTO_MM = 2.0
 # Margen implante–diente vecino (RP-001 → R-013, decisión clínica 2026-10-07).
@@ -26,6 +26,9 @@ MARGEN_HUESO_POR_DEFECTO_MM = 1.5
 ESTRUCTURAS_ESPESOR = {"hueso"}
 # Estructuras que se miden contra el lecho fresado, que pasa el ápice (R-017).
 ESTRUCTURAS_CON_SOBREFRESADO = {"canal"}
+# Margen implante–implante: 1,5 mm alrededor de cada uno, 3 mm entre superficies
+# (RP-002 → R-023, decisión clínica 2026-10-07).
+MARGEN_IMPLANTES_POR_DEFECTO_MM = 3.0
 _PASO_RAYOS_MM = 0.25        # separación de los rayos en altura y contorno, y paso grueso a lo largo
 _PASO_FINO_MM = 0.01         # resolución final del espesor
 _ESPESOR_MAXIMO_MM = 10.0    # más allá, el espesor se informa como 10 mm
@@ -414,3 +417,37 @@ def _dentro(malla: vtk.vtkPolyData, puntos: np.ndarray) -> np.ndarray:
     encerrados.Update()
     return numpy_support.vtk_to_numpy(
         encerrados.GetOutput().GetPointData().GetArray("SelectedPoints")).astype(bool)
+
+
+def distancia_entre_implantes(a: Implante, b: Implante, paso: float = PASO_MUESTREO_MM) -> dict:
+    """Distancia mínima entre las superficies de dos implantes (cilindros sólidos) y si chocan.
+
+    Se muestrea la superficie de cada uno cada `paso` mm y se mide contra el
+    otro con la distancia exacta punto–cilindro, en los dos sentidos. Si un
+    cilindro tiene puntos dentro del otro, la distancia es 0 (colisión).
+    """
+    da = b.distancia_a_puntos(a.puntos_superficie(paso))
+    db = a.distancia_a_puntos(b.puntos_superficie(paso))
+    distancia = float(min(da.min(), db.min()))
+    colision = distancia <= TOLERANCIA_SUPERFICIE_MM
+    return {"distancia_mm": 0.0 if colision else distancia, "colision": bool(colision)}
+
+
+def evaluar_implantes(implantes: dict, margen: float = MARGEN_IMPLANTES_POR_DEFECTO_MM) -> dict:
+    """Semáforo implante–implante para cada par (R-023): verde si la distancia alcanza el margen.
+
+    implantes: {nombre: Implante}. El semáforo global es rojo si algún par es rojo.
+    """
+    margen = float(margen)
+    if not np.isfinite(margen) or margen < 0:
+        raise ValueError(f"El margen entre implantes debe ser un número mayor o igual que 0 mm (se recibió {margen}).")
+    nombres = list(implantes)
+    pares = {}
+    for i, a in enumerate(nombres):                 # pares de implantes: unos pocos, no vértices
+        for b in nombres[i + 1:]:
+            r = distancia_entre_implantes(implantes[a], implantes[b])
+            r.update({"margen_mm": margen,
+                      "semaforo": "rojo" if r["colision"] or r["distancia_mm"] < margen else "verde"})
+            pares[f"{a}-{b}"] = r
+    rojo = any(r["semaforo"] == "rojo" for r in pares.values())
+    return {"semaforo": "rojo" if rojo else "verde", "pares": pares}

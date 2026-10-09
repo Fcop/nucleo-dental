@@ -37,7 +37,8 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ `guia` en el caso real con la curva CC y el plano oclusal de Francisco: válida en dento y dentomucosoportada (eje de inserción a 18,2° del implante)
 - ✅ Carcasa desde la curva sin puente; holgura de 1 mm sobre la encía solo en dentosoportada
 - ✅ Informe de ajuste guía–escaneo antes de imprimir (R-022): objetivo por punto, histograma y mapa .vtp; una interferencia invalida la guía; desvío aceptable 0,10 mm (confirmado)
-- ☐ Guías de varios implantes: una columna, orificio y alivio por implante, en el mismo ensamblaje (prioridad alta)
+- ✅ Varios implantes (R-023): semáforo implante–implante (3 mm), un anillo por implante, pared entre orificios (aviso < 1 mm, solape = no válida); caso dorado 018
+- ☐ `medir` con varios implantes en caso.json (hoy el semáforo implante–implante sale en `guia`)
 - ☐ Ventanas de inspección para verificar el asiento de la guía (negativos sobre los dientes)
 - ☐ Pines de fijación al hueso, con su dirección y su camisa (clave en dentomuco y mucosoportada)
 - ☐ Texto grabado en la guía: caso, kit y posición del implante (trazabilidad)

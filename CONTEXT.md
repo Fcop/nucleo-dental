@@ -112,6 +112,10 @@ _Evitar_: retención, socavado (en el código y la documentación nueva)
 Separación entre la cara interna de la guía y el escaneo, según el método de fabricación.
 _Evitar_: holgura (es la del puente sobre la encía), juego, offset
 
+**Pared entre orificios**:
+Resina que queda entre dos orificios vecinos cuando sus anillos se funden; bajo 1 mm es un aviso y si los orificios se solapan la guía no es válida.
+_Evitar_: tabique, puente (es otra pieza)
+
 **Puente**:
 Parte de la guía que cruza sobre la brecha y une el anillo con el apoyo; con holgura sobre la encía solo si la guía es dentosoportada.
 _Evitar_: póntico, barra

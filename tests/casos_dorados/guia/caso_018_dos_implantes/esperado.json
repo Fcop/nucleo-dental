@@ -1,0 +1,11 @@
+{
+  "distancia_superficies_mm": 3.9,
+  "semaforo": "verde",
+  "cara_superior_A_z": 8.5,
+  "cara_superior_B_z": 7.5,
+  "pared_entre_orificios_mm": 2.7,
+  "anillos_fundidos": true,
+  "umbral_rojo_x_centro_B": 7.1,
+  "tolerancia_mm": 0.05,
+  "origen": "Francisco, 2026-10-09: distancia entre superficies 3,9 (verde con el margen de 3 mm de RP-002); caras superiores A 8,5 y B 7,5; pared entre orificios 2,7; anillos fundidos. Primera respuesta 2,7 / rojo / 12,5 y 11,5 / 6, corregida por él tras revisar los diagramas con centros y bordes. Umbral: rojo con el centro de B en x < 7,1 (se mueve más de 0,9 mm); en 7,1 exacto la distancia es 3,0 y es verde, como en R-006, confirmado por él."
+}

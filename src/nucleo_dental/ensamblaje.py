@@ -44,6 +44,9 @@ _ARRAY_HOLGURA = "HolguraEncia"
 # 0,08 mm³). Una pieza real de una carcasa de 3 mm supera los 3 mm³.
 # Confirmado por Francisco el 2026-10-09.
 VOLUMEN_MINIMO_PIEZA_MM3 = 1.0
+# Pared de resina mínima entre dos orificios vecinos; si se solapan la guía no
+# es válida (decisión clínica de Francisco, 2026-10-09).
+PARED_MINIMA_ORIFICIOS_MM = 1.0
 # Pasadas de promedio de la marca diente/encía: la carcasa sube a la holgura en
 # una rampa de ~1 mm (aristas del escaneo de ~0,2–0,3 mm) en vez de un escalón.
 _PASADAS_TRANSICION_ENCIA = 10
@@ -227,43 +230,85 @@ def _separacion_por_nodo(escaneo, holgura_por_vertice, d_escaneo, origen, espaci
     return separacion
 
 
-def guia_quirurgica(escaneo, dientes, implante: Implante, kit: PerfilKit, fabricacion: str, mascara_apoyo,
+def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: str, mascara_apoyo,
                     eje_insercion, tipo_soporte: str = "dentosoportada", con_puente: bool = False,
                     espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM) -> dict:
-    """Guía completa: carcasa dentro de los límites + columna del anillo con su orificio.
+    """Guía completa: carcasa dentro de los límites + un anillo con su orificio por implante (R-021, R-023).
 
-    Con los límites del usuario (curva cerrada) la carcasa ya cubre la brecha:
-    en una guía dentosoportada sube `kit.holgura_encia_mm` sobre la encía y
-    apoya en los dientes; si apoya en mucosa no hay holgura (R-020).
-    `con_puente` agrega el puente automático (R-019), pensado para una región
-    automática que solo cubre dientes.
+    `implantes` es un Implante o una lista: todos comparten el kit y el método
+    de fabricación (una sola cirugía, decisión 2026-10-09). Con los límites del
+    usuario (curva cerrada) la carcasa ya cubre la brecha: en una guía
+    dentosoportada sube `kit.holgura_encia_mm` sobre la encía y apoya en los
+    dientes; si apoya en mucosa no hay holgura (R-020). `con_puente` agrega el
+    puente automático (R-019), pensado para una región automática que solo
+    cubre dientes y un solo implante.
     """
     from nucleo_dental.guia import TIPOS_SOPORTE, anillo_y_orificio, columna_del_anillo, puente_y_columna
 
     if tipo_soporte not in TIPOS_SOPORTE:
         raise ValueError(f"Tipo de soporte desconocido '{tipo_soporte}'; opciones: " + ", ".join(TIPOS_SOPORTE))
+    implantes = [implantes] if isinstance(implantes, Implante) else list(implantes)
+    if not implantes:
+        raise ValueError("La guía necesita al menos un implante.")
+    if con_puente and len(implantes) > 1:
+        raise ValueError("El puente automático es para un solo implante; con varios, define los límites con la curva.")
     holgura = kit.holgura_encia_mm if tipo_soporte == "dentosoportada" else 0.0
-    if con_puente:
-        pc = puente_y_columna(escaneo, dientes, implante, kit, fabricacion, tipo_soporte=tipo_soporte)
-        extras = [pc["puente"]]
-    else:
-        pc = columna_del_anillo(escaneo, implante, kit, fabricacion, holgura)
-        extras = []
+    anillos, extras, negativos = [], [], []
+    for implante in implantes:                       # unos pocos implantes, no vértices
+        if con_puente:
+            pc = puente_y_columna(escaneo, dientes, implante, kit, fabricacion, tipo_soporte=tipo_soporte)
+            extras.append(pc["puente"])
+        else:
+            pc = columna_del_anillo(escaneo, implante, kit, fabricacion, holgura)
+        anillos.append(pc)
+        extras.append(pc["columna"])
+        negativos.append(anillo_y_orificio(implante, kit, fabricacion)[1])
+        if pc["alivio"] is not None:
+            negativos.append(pc["alivio"])
     por_vertice = None
     if holgura > 0:
         if dientes is None:
             raise ValueError("Una guía dentosoportada necesita los dientes del CBCT para separar diente de encía.")
         por_vertice = holgura_sobre_encia(escaneo, dientes, holgura)
-    positivos = piezas_de_apoyo(escaneo, mascara_apoyo, kit, eje_insercion, por_vertice) + extras + [pc["columna"]]
-    _, orificio = anillo_y_orificio(implante, kit, fabricacion)
-    negativos = [orificio] + ([pc["alivio"]] if pc["alivio"] is not None else [])
+    positivos = piezas_de_apoyo(escaneo, mascara_apoyo, kit, eje_insercion, por_vertice) + extras
     resultado = ensamblar(positivos, escaneo, eje_insercion, kit.tolerancia_ajuste(fabricacion),
                           negativos=negativos, espaciado_mm=espaciado_mm, holgura_por_vertice=por_vertice)
-    resultado.update({"puente_y_columna": {k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")},
+    resultado["avisos"] = []
+    resultado["paredes_entre_orificios"] = _revisar_paredes(implantes, anillos, resultado)
+    resultado.update({"anillos": [{k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")}
+                                  for pc in anillos],
                       "tipo_soporte": tipo_soporte, "con_puente": con_puente, "holgura_encia_mm": holgura,
                       "fabricacion": fabricacion, "kit": kit.nombre})
+    resultado["puente_y_columna"] = resultado["anillos"][0]
     _agregar_ajuste(resultado, escaneo, kit.tolerancia_ajuste(fabricacion), por_vertice)
     return resultado
+
+
+def _revisar_paredes(implantes, anillos, resultado: dict) -> list:
+    """Pared de resina entre cada par de orificios, dentro de la guía (del piso a la cara superior).
+
+    Bajo PARED_MINIMA_ORIFICIOS_MM es un aviso; si los orificios se solapan la
+    guía no es válida (decisión clínica 2026-10-09).
+    """
+    from nucleo_dental.medicion import distancia_entre_implantes
+
+    tramos = []
+    for implante, pc in zip(implantes, anillos):
+        piso = np.asarray(pc["piso_en_eje"], dtype=float)
+        largo = float((np.asarray(pc["geometria"]["cara_superior"]) - piso) @ implante.eje)
+        tramos.append(Implante(pc["geometria"]["diametro_orificio_mm"], largo, piso, implante.eje))
+    paredes = []
+    for i in range(len(tramos)):                     # pares de orificios
+        for j in range(i + 1, len(tramos)):
+            d = distancia_entre_implantes(tramos[i], tramos[j])
+            paredes.append({"orificios": [i + 1, j + 1], "pared_mm": d["distancia_mm"], "solapados": d["colision"]})
+            if d["colision"]:
+                resultado["valida"] = False
+                resultado["problemas"].append(f"Los orificios {i + 1} y {j + 1} se solapan: la fresa no tendría guía.")
+            elif d["distancia_mm"] < PARED_MINIMA_ORIFICIOS_MM:
+                resultado["avisos"].append(f"Entre los orificios {i + 1} y {j + 1} quedan {d['distancia_mm']:.2f} mm "
+                                           f"de resina (mínimo {PARED_MINIMA_ORIFICIOS_MM} mm).")
+    return paredes
 
 
 def _agregar_ajuste(resultado: dict, escaneo, tolerancia_mm: float, holgura_por_vertice) -> None:

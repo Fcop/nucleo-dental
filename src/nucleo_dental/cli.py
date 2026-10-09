@@ -154,7 +154,8 @@ def _crear_parser() -> argparse.ArgumentParser:
                                     "anillo, recorte por el eje de inserción y tolerancia (R-021).")
     g.add_argument("--escaneo", help="STL CERRADO del escaneo intraoral registrado con el CBCT, en LPS.")
     g.add_argument("--dientes", help="STL de los dientes segmentados del CBCT (no hace falta si es mucosoportada).")
-    g.add_argument("--implante-stl", help="STL del implante planificado.")
+    g.add_argument("--implante-stl", action="append", help="STL de un implante planificado; repetir por cada implante "
+                                                              "(misma guía, mismo kit).")
     g.add_argument("--apice-hacia", help="'abajo' (mandíbula) o 'arriba' (maxilar).")
     g.add_argument("--curva", help="Límites de la guía: curva cerrada dibujada en Slicer (.mrk.json).")
     g.add_argument("--punto-interior", help="Punto x,y,z (LPS) dentro de la curva; por defecto su centro.")
@@ -167,12 +168,13 @@ def _crear_parser() -> argparse.ArgumentParser:
 
 
 def _guia(args) -> dict:
-    """Subcomando `guia` (R-021)."""
+    """Subcomando `guia` (R-021, R-022, R-023)."""
     import vtk
 
     from nucleo_dental.apoyo import leer_puntos_slicer, region_desde_curva
     from nucleo_dental.ensamblaje import eje_desde_plano_oclusal, guia_quirurgica
     from nucleo_dental.kits import obtener_kit
+    from nucleo_dental.medicion import evaluar_implantes
 
     soporte = args.soporte or "dentosoportada"
     requeridos = ["escaneo", "implante_stl", "apice_hacia", "curva", "plano_oclusal", "salida"]
@@ -181,18 +183,19 @@ def _guia(args) -> dict:
     faltan = [f"--{n.replace('_', '-')}" for n in requeridos if getattr(args, n) is None]
     if faltan:
         raise ErrorEntrada("faltan parámetros: " + ", ".join(faltan))
-    rutas = {n: Path(getattr(args, n)) for n in ("escaneo", "implante_stl", "curva", "plano_oclusal")}
+    rutas = {n: Path(getattr(args, n)) for n in ("escaneo", "curva", "plano_oclusal")}
+    rutas_implantes = [Path(r) for r in args.implante_stl]
     ruta_dientes = Path(args.dientes) if args.dientes is not None else None
     fabricacion = args.fabricacion or "impresa"
     kit = obtener_kit(args.kit or "oneguide")
 
     escaneo = leer_stl(rutas["escaneo"])
-    implante = Implante.desde_malla(leer_stl(rutas["implante_stl"]), args.apice_hacia)
+    implantes = [Implante.desde_malla(leer_stl(r), args.apice_hacia) for r in rutas_implantes]
     plano = leer_puntos_slicer(rutas["plano_oclusal"])
-    eje = eje_desde_plano_oclusal(plano, implante.eje)
+    eje = eje_desde_plano_oclusal(plano, np.mean([i.eje for i in implantes], axis=0))
     interior = _vector(args.punto_interior, "--punto-interior") if args.punto_interior is not None else None
     mascara = region_desde_curva(escaneo, leer_puntos_slicer(rutas["curva"]), interior)
-    r = guia_quirurgica(escaneo, leer_stl(ruta_dientes) if ruta_dientes else None, implante, kit, fabricacion,
+    r = guia_quirurgica(escaneo, leer_stl(ruta_dientes) if ruta_dientes else None, implantes, kit, fabricacion,
                         mascara, eje, tipo_soporte=soporte)
 
     ruta_salida = Path(args.salida)
@@ -218,16 +221,22 @@ def _guia(args) -> dict:
     ajuste["mapa"] = {"ruta": str(ruta_mapa.resolve()), "sha256": _sha256(ruta_mapa),
                       "escalar": "Desvio_mm (separación − objetivo; negativo = más apretado)"}
 
-    pc = r["puente_y_columna"]
-    angulo = float(np.degrees(np.arccos(np.clip(abs(np.dot(eje, implante.eje)), -1.0, 1.0))))
-    archivos = [rutas["escaneo"], rutas["implante_stl"], rutas["curva"], rutas["plano_oclusal"]]
+    anillos = []
+    for ruta, implante, pc in zip(rutas_implantes, implantes, r["anillos"]):
+        angulo = float(np.degrees(np.arccos(np.clip(abs(np.dot(eje, implante.eje)), -1.0, 1.0))))
+        anillos.append({"implante_stl": str(ruta), "angulo_eje_insercion_grados": angulo, **pc})
+    entre_implantes = (evaluar_implantes({f"implante_{i + 1}": imp for i, imp in enumerate(implantes)})
+                       if len(implantes) > 1 else None)
+    archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"]]
     return {
-        "guia": {"valida": r["valida"], "problemas": r["problemas"],
+        "guia": {"valida": r["valida"], "problemas": r["problemas"], "avisos": r["avisos"],
                  "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
         "ajuste": ajuste,
-        "geometria": {"eje_insercion": r["eje_insercion"], "angulo_eje_implante_grados": angulo,
-                      "tolerancia_ajuste_mm": r["tolerancia_mm"], **pc},
-        "parametros": {**{n: str(v) for n, v in rutas.items()}, "dientes": str(ruta_dientes) if ruta_dientes else None,
+        "geometria": {"eje_insercion": r["eje_insercion"], "tolerancia_ajuste_mm": r["tolerancia_mm"],
+                      "anillos": anillos, "paredes_entre_orificios": r["paredes_entre_orificios"]},
+        "entre_implantes": entre_implantes,
+        "parametros": {**{n: str(v) for n, v in rutas.items()}, "implantes_stl": [str(x) for x in rutas_implantes],
+                       "dientes": str(ruta_dientes) if ruta_dientes else None,
                        "apice_hacia": args.apice_hacia, "punto_interior": interior, "fabricacion": fabricacion,
                        "tipo_soporte": soporte, "kit": kit.nombre, "provisionales": sorted(kit.provisionales),
                        "sistema_coordenadas": "LPS", "unidades": "mm"},
