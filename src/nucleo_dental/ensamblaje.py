@@ -3,7 +3,7 @@
 Todo se resuelve en UNA grilla, rotada para que el eje de inserción sea +z,
 con campos de distancia continuos (positivos dentro de cada sólido):
 
-    F = mín( máx(d_pieza ...),        unión de apoyo, puente y columna
+    F = mín( máx(d_pieza ...),        unión de carcasa, columna (y puente, si lo hay)
              −d_escaneo − T,          tolerancia de ajuste T guía–escaneo
              −sombra,                 lo que choca al retirar la guía por el eje
              −d_negativo ... )        orificio de la fresa y alivio
@@ -38,6 +38,15 @@ _MARGEN_GRILLA_MM = 1.0
 _PASADAS_NORMALES_APOYO = 10
 _PASADAS_BORDE_APOYO = 10
 _LEJOS_MM = 1000.0
+_ARRAY_HOLGURA = "HolguraEncia"
+# Piezas sueltas por debajo de este volumen se descartan como astillas: aparecen
+# donde la cara externa se pliega sobre una fisura cóncava (caso real: 0,02 y
+# 0,08 mm³). Una pieza real de una carcasa de 3 mm supera los 3 mm³.
+# PROVISIONAL, a confirmar por Francisco.
+VOLUMEN_MINIMO_PIEZA_MM3 = 1.0
+# Pasadas de promedio de la marca diente/encía: la carcasa sube a la holgura en
+# una rampa de ~1 mm (aristas del escaneo de ~0,2–0,3 mm) en vez de un escalón.
+_PASADAS_TRANSICION_ENCIA = 10
 
 
 def eje_desde_plano_oclusal(puntos, referencia) -> np.ndarray:
@@ -61,11 +70,13 @@ def eje_desde_plano_oclusal(puntos, referencia) -> np.ndarray:
     return normal if sentido > 0 else -normal
 
 
-def piezas_de_apoyo(escaneo, mascara, kit: PerfilKit, eje_insercion) -> list:
+def piezas_de_apoyo(escaneo, mascara, kit: PerfilKit, eje_insercion, holgura_por_vertice=None) -> list:
     """Sólidos del apoyo: cada pieza de la región con el espesor de la plantilla, hacia afuera.
 
     La región puede tener varias piezas (dientes separados por encía); se
-    devuelven por separado y se unen en el ensamblaje.
+    devuelven por separado y se unen en el ensamblaje. `holgura_por_vertice`
+    (mm, un valor por vértice del escaneo) levanta la carcasa sobre esos
+    vértices, p. ej. sobre la encía en una guía dentosoportada.
     """
     import vtk
 
@@ -73,7 +84,9 @@ def piezas_de_apoyo(escaneo, mascara, kit: PerfilKit, eje_insercion) -> list:
     from nucleo_dental.geometria.malla_guia import parche_a_solido
     from nucleo_dental.guia import _alisar_borde, _orientar_hacia
 
-    parche = parche_de_apoyo(escaneo, np.asarray(mascara, bool))
+    n = escaneo.GetNumberOfPoints()
+    holgura = np.zeros(n) if holgura_por_vertice is None else np.asarray(holgura_por_vertice, dtype=float)
+    parche = parche_de_apoyo(escaneo, np.asarray(mascara, bool), datos={_ARRAY_HOLGURA: holgura})
     piezas = vtk.vtkPolyDataConnectivityFilter()
     piezas.SetInputData(parche)
     piezas.SetExtractionModeToAllRegions()
@@ -88,12 +101,40 @@ def piezas_de_apoyo(escaneo, mascara, kit: PerfilKit, eje_insercion) -> list:
         limpia.SetInputConnection(una.GetOutputPort())
         limpia.Update()
         pieza = _alisar_borde(_orientar_hacia(limpia.GetOutput(), eje_insercion), _PASADAS_BORDE_APOYO)
-        solidos.append(parche_a_solido(pieza, kit.espesor_plantilla_mm, suavizado_normales=_PASADAS_NORMALES_APOYO))
+        solidos.append(parche_a_solido(pieza, kit.espesor_plantilla_mm, desfase=_ARRAY_HOLGURA,
+                                       suavizado_normales=_PASADAS_NORMALES_APOYO))
     return solidos
 
 
+def holgura_sobre_encia(escaneo, dientes, holgura_mm: float) -> np.ndarray:
+    """Holgura por vértice del escaneo: `holgura_mm` sobre la encía, 0 sobre los dientes.
+
+    La marca diente/encía (apoyo.clasificar_diente_encia) se promedia con los
+    vecinos para que la carcasa suba en rampa y no en escalón.
+    """
+    import vtk
+    from vtk.util import numpy_support
+
+    from nucleo_dental.apoyo import clasificar_diente_encia
+
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputData(escaneo)
+    tri.Update()
+    triangulos = numpy_support.vtk_to_numpy(tri.GetOutput().GetPolys().GetConnectivityArray()).reshape(-1, 3)
+    encia = (~clasificar_diente_encia(escaneo, dientes)).astype(float)
+    for _ in range(_PASADAS_TRANSICION_ENCIA):
+        suma = encia.copy()
+        cuenta = np.ones(len(encia))
+        for k in range(3):   # cada vértice recibe los valores de los otros dos vértices de cada triángulo
+            np.add.at(suma, triangulos[:, k], encia[triangulos[:, (k + 1) % 3]] + encia[triangulos[:, (k + 2) % 3]])
+            np.add.at(cuenta, triangulos[:, k], 2)
+        encia = suma / cuenta
+    return holgura_mm * encia
+
+
 def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos=(),
-              espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM) -> dict:
+              espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM,
+              volumen_minimo_pieza_mm3: float = VOLUMEN_MINIMO_PIEZA_MM3) -> dict:
     """Une los positivos, aplica tolerancia y desbloqueo por el eje, resta los negativos y valida.
 
     positivos, negativos: sólidos cerrados (vtkPolyData). Devuelve {"guia",
@@ -140,11 +181,12 @@ def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos
     guia_z = tl._superficie(f, origen, espaciado_mm)
     if guia_z.GetNumberOfPoints() == 0:
         raise RuntimeError("El ensamblaje no dejó nada de la guía: revisa el eje de inserción y los límites.")
-    guia_z, cavidades, fragmentos = _limpiar_piezas(guia_z, espaciado_mm)
+    guia_z, cavidades, fragmentos, volumen_descartado = _limpiar_piezas(guia_z, volumen_minimo_pieza_mm3)
     guia = uc._aplicar_matriz(guia_z, uc._matriz_vtk(rotacion, inversa=True))
     valida, problemas, metricas = mg.validar_guia(guia, escaneo, eje=tuple(eje))
     metricas["cavidades_rellenas"] = cavidades
-    metricas["fragmentos_descartados"] = fragmentos
+    metricas["astillas_descartadas"] = fragmentos
+    metricas["volumen_astillas_mm3"] = volumen_descartado
     return {
         "guia": guia,
         "valida": bool(valida),
@@ -157,30 +199,51 @@ def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos
 
 
 def guia_quirurgica(escaneo, dientes, implante: Implante, kit: PerfilKit, fabricacion: str, mascara_apoyo,
-                    eje_insercion, tipo_soporte: str = "dentosoportada",
+                    eje_insercion, tipo_soporte: str = "dentosoportada", con_puente: bool = False,
                     espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM) -> dict:
-    """Guía completa: apoyo (máscara del usuario o automática) + puente + anillo con su orificio."""
-    from nucleo_dental.guia import anillo_y_orificio, puente_y_columna
+    """Guía completa: carcasa dentro de los límites + columna del anillo con su orificio.
 
-    pc = puente_y_columna(escaneo, dientes, implante, kit, fabricacion, tipo_soporte=tipo_soporte)
-    positivos = piezas_de_apoyo(escaneo, mascara_apoyo, kit, eje_insercion) + [pc["puente"], pc["columna"]]
+    Con los límites del usuario (curva cerrada) la carcasa ya cubre la brecha:
+    en una guía dentosoportada sube `kit.holgura_encia_mm` sobre la encía y
+    apoya en los dientes; si apoya en mucosa no hay holgura (R-020).
+    `con_puente` agrega el puente automático (R-019), pensado para una región
+    automática que solo cubre dientes.
+    """
+    from nucleo_dental.guia import TIPOS_SOPORTE, anillo_y_orificio, columna_del_anillo, puente_y_columna
+
+    if tipo_soporte not in TIPOS_SOPORTE:
+        raise ValueError(f"Tipo de soporte desconocido '{tipo_soporte}'; opciones: " + ", ".join(TIPOS_SOPORTE))
+    holgura = kit.holgura_encia_mm if tipo_soporte == "dentosoportada" else 0.0
+    if con_puente:
+        pc = puente_y_columna(escaneo, dientes, implante, kit, fabricacion, tipo_soporte=tipo_soporte)
+        extras = [pc["puente"]]
+    else:
+        pc = columna_del_anillo(escaneo, implante, kit, fabricacion, holgura)
+        extras = []
+    por_vertice = None
+    if holgura > 0:
+        if dientes is None:
+            raise ValueError("Una guía dentosoportada necesita los dientes del CBCT para separar diente de encía.")
+        por_vertice = holgura_sobre_encia(escaneo, dientes, holgura)
+    positivos = piezas_de_apoyo(escaneo, mascara_apoyo, kit, eje_insercion, por_vertice) + extras + [pc["columna"]]
     _, orificio = anillo_y_orificio(implante, kit, fabricacion)
     negativos = [orificio] + ([pc["alivio"]] if pc["alivio"] is not None else [])
     resultado = ensamblar(positivos, escaneo, eje_insercion, kit.tolerancia_ajuste(fabricacion),
                           negativos=negativos, espaciado_mm=espaciado_mm)
     resultado.update({"puente_y_columna": {k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")},
-                      "tipo_soporte": tipo_soporte, "fabricacion": fabricacion, "kit": kit.nombre})
+                      "tipo_soporte": tipo_soporte, "con_puente": con_puente, "holgura_encia_mm": holgura,
+                      "fabricacion": fabricacion, "kit": kit.nombre})
     return resultado
 
 
-def _limpiar_piezas(malla, espaciado: float):
-    """(malla limpia, cavidades rellenadas, fragmentos descartados).
+def _limpiar_piezas(malla, volumen_minimo_mm3: float):
+    """(malla limpia, cavidades rellenadas, astillas descartadas, volumen de las astillas).
 
     Cavidad: superficie cerrada entera dentro del cuerpo principal (burbuja
     donde una pieza se autointersecta y la paridad del estencil invierte el
-    signo); descartarla deja ese volumen macizo. Fragmento: pieza de menos de
-    un vóxel de volumen, isla de muestreo de la grilla. Cualquier otra pieza
-    suelta se conserva para que la validación la reporte.
+    signo); descartarla deja ese volumen macizo. Astilla: pieza suelta de menos
+    de `volumen_minimo_mm3`. Cualquier otra pieza suelta se conserva para que
+    la validación la reporte.
     """
     import vtk
     from vtk.util import numpy_support
@@ -194,7 +257,7 @@ def _limpiar_piezas(malla, espaciado: float):
     piezas.Update()
     n = piezas.GetNumberOfExtractedRegions()
     if n <= 1:
-        return malla, 0, 0
+        return _solo_triangulos(malla), 0, 0, 0.0
     salida = piezas.GetOutput()
     region_punto = numpy_support.vtk_to_numpy(salida.GetPointData().GetArray("RegionId"))
     puntos = numpy_support.vtk_to_numpy(salida.GetPoints().GetData()).astype(float)
@@ -214,7 +277,7 @@ def _limpiar_piezas(malla, espaciado: float):
     primero = np.full(n, -1)
     primero[region_punto[::-1]] = np.arange(len(region_punto))[::-1]   # primer punto de cada región
     adentro = _dentro(cuerpo.GetOutput(), puntos[primero[otras]])
-    fragmento = volumen[otras] < espaciado ** 3
+    fragmento = volumen[otras] < volumen_minimo_mm3
     conservar = [principal] + otras[~adentro & ~fragmento].tolist()
     final = vtk.vtkPolyDataConnectivityFilter()
     final.SetInputData(malla)
@@ -224,7 +287,21 @@ def _limpiar_piezas(malla, espaciado: float):
     limpia = vtk.vtkCleanPolyData()
     limpia.SetInputConnection(final.GetOutputPort())
     limpia.Update()
-    return limpia.GetOutput(), int(adentro.sum()), int((fragmento & ~adentro).sum())
+    astillas = fragmento & ~adentro
+    return (_solo_triangulos(limpia.GetOutput()), int(adentro.sum()), int(astillas.sum()),
+            float(volumen[otras][astillas].sum()))
+
+
+def _solo_triangulos(malla):
+    """Quita las líneas y vértices sueltos que deja vtkCleanPolyData al colapsar triángulos degenerados."""
+    import vtk
+
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputData(malla)
+    tri.PassVertsOff()
+    tri.PassLinesOff()
+    tri.Update()
+    return tri.GetOutput()
 
 
 def _grilla_comun(mallas, espaciado: float, margen: float):

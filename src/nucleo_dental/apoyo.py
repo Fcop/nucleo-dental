@@ -177,13 +177,21 @@ def leer_puntos_slicer(ruta) -> np.ndarray:
     raise ValueError(f"{ruta}: falta coordinateSystem (LPS o RAS); no se adivina el sistema de coordenadas.")
 
 
-def parche_de_apoyo(escaneo: vtk.vtkPolyData, mascara: np.ndarray, solo_mayor: bool = False) -> vtk.vtkPolyData:
-    """Parche abierto del escaneo con los triángulos cuyos tres vértices están en la región."""
+def parche_de_apoyo(escaneo: vtk.vtkPolyData, mascara: np.ndarray, solo_mayor: bool = False,
+                    datos: dict | None = None) -> vtk.vtkPolyData:
+    """Parche abierto del escaneo con los triángulos cuyos tres vértices están en la región.
+
+    `datos` ({nombre: valor por vértice del escaneo}) viaja con los vértices al parche.
+    """
     copia = vtk.vtkPolyData()
     copia.DeepCopy(escaneo)
     region = numpy_support.numpy_to_vtk(mascara.astype(np.float32), deep=True)
     region.SetName(ARRAY_REGION)
     copia.GetPointData().AddArray(region)
+    for nombre, valores in (datos or {}).items():
+        arreglo = numpy_support.numpy_to_vtk(np.ascontiguousarray(valores, dtype=float), deep=True)
+        arreglo.SetName(nombre)
+        copia.GetPointData().AddArray(arreglo)
     return extraer_parche(copia, solo_mayor=solo_mayor)
 
 

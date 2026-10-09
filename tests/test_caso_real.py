@@ -137,3 +137,38 @@ def test_modelo_real_en_lps_cae_dentro_y_en_ras_fuera(volumen, modelo):
     vertices = _vertices(modelo)
     assert volumen.contiene(vertices).all()
     assert not volumen.contiene(vertices * [-1, -1, 1]).any()
+
+
+@pytest.mark.skipif(not (CASO / "CC.mrk.json").is_file() or not (CASO / "puntos_plano.mrk.json").is_file(),
+                    reason="sin la curva de límites o el plano oclusal de Francisco")
+@pytest.mark.parametrize("soporte", ["dentomucosoportada", "dentosoportada"])
+def test_guia_real_con_curva_y_plano_oclusal(soporte):
+    """Verifica R-021 con el caso real: curva CC y plano oclusal de Francisco dan una guía válida, fuera del hueso, con Ø5,3."""
+    import vtk
+
+    from nucleo_dental.apoyo import leer_puntos_slicer, region_desde_curva
+    from nucleo_dental.ensamblaje import eje_desde_plano_oclusal, guia_quirurgica
+    from nucleo_dental.implante import Implante
+    from nucleo_dental.kits import ONEGUIDE
+    from nucleo_dental.medicion import _dentro
+
+    escaneo = leer_stl(CASO / "escaneo_registrado.stl")
+    implante = Implante.desde_malla(leer_stl(CASO / "implante.stl"), "abajo")
+    eje = eje_desde_plano_oclusal(leer_puntos_slicer(CASO / "puntos_plano.mrk.json"), implante.eje)
+    mascara = region_desde_curva(escaneo, leer_puntos_slicer(CASO / "CC.mrk.json"))
+    r = guia_quirurgica(escaneo, leer_stl(CASO / "Lower Teeth.stl"), implante, ONEGUIDE, "impresa", mascara, eje,
+                        tipo_soporte=soporte)
+    assert r["valida"], r["problemas"]
+    puntos = numpy_support.vtk_to_numpy(r["guia"].GetPoints().GetData())
+    assert not _dentro(leer_stl(CASO / "Mandible.stl"), puntos).any()
+
+    arbol = vtk.vtkOBBTree()
+    arbol.SetDataSet(r["guia"])
+    arbol.BuildLocator()
+    cara_superior = np.array(r["puente_y_columna"]["geometria"]["cara_superior"])
+    centro = cara_superior - 2.0 * implante.eje
+    lado = np.cross(implante.eje, [1.0, 0.0, 0.0])
+    lado /= np.linalg.norm(lado)
+    cortes = vtk.vtkPoints()
+    arbol.IntersectWithLine(centro, centro + 10 * lado, cortes, None)
+    assert np.linalg.norm(np.array(cortes.GetPoint(0)) - centro) == pytest.approx(5.3 / 2, abs=0.05)

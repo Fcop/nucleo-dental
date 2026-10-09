@@ -6,3 +6,8 @@ datos_locales/
 *.dcm
 undercuts/
 tests/casos_prueba/
+
+# Módulos externos de Slicer de Francisco (GuiaCorteTraumatologica, EliminarUndercuts):
+# viven en sus propios proyectos; aquí solo como referencia local. Ver docs/problemas-modulos-externos.md
+GuiaCorteTraumatologica/
+EliminarUndercuts/

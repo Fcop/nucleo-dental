@@ -414,7 +414,7 @@ def contar_bucles_borde(pd: vtk.vtkPolyData) -> int:
 
 def parche_a_solido(parche: vtk.vtkPolyData,
                     grosor: float,
-                    desfase: float = 0.0,
+                    desfase=0.0,
                     suavizado_normales: int = 0) -> vtk.vtkPolyData:
     """Convierte un parche abierto en un solido cerrado de grosor constante.
 
@@ -429,6 +429,8 @@ def parche_a_solido(parche: vtk.vtkPolyData,
     desplazamiento), y la extrusion se mete en el tejido (RG-017).
     `suavizado_normales` promedia cada normal con las de sus vecinos esa
     cantidad de veces, para que el ruido del escaneo no abra aletas en el borde.
+    `desfase` es un número o el nombre de un array de puntos del parche (un
+    desfase por vértice, p. ej. holgura solo sobre la encía).
 
     Como intrados y extrados comparten numeracion de puntos, el cosido es
     exacto y no depende de reordenar el bucle de borde.
@@ -439,10 +441,14 @@ def parche_a_solido(parche: vtk.vtkPolyData,
     """
     if grosor <= 0:
         raise ValueError("El grosor debe ser positivo.")
-    if desfase < 0:
-        raise ValueError("El desfase debe ser mayor o igual que 0.")
-
     parche = _normales(parche, auto_orientar=False)
+    if isinstance(desfase, str):
+        arreglo = parche.GetPointData().GetArray(desfase)
+        if arreglo is None:
+            raise ValueError("El parche no tiene el array de desfase '%s'." % desfase)
+        desfase = numpy_support.vtk_to_numpy(arreglo).astype(float)[:, None]
+    if np.any(np.asarray(desfase) < 0):
+        raise ValueError("El desfase debe ser mayor o igual que 0.")
 
     n_bucles = contar_bucles_borde(parche)
     if n_bucles != 1:

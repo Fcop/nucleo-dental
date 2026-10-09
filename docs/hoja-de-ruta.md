@@ -34,8 +34,11 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ Corrección del puente (RG-017): holgura y espesor con las mismas normales (ya no entra en el hueso) y contorno alisado
 - ✅ Límites de la guía definidos por el usuario con la curva cerrada por puntos (decisión 2026-10-09): `guia` exige `--curva`; lo automático (`apoyo`) queda como propuesta inicial
 - ✅ Ensamblaje (R-021): eje de inserción normal al plano oclusal (3 puntos), recorte de undercuts, tolerancia de ajuste por fabricación, resta del orificio, validación y exportación STL; comando `nucleo-dental guia`; caso dorado 017
-- ☐ Probar `guia` con la curva de límites y los 3 puntos oclusales de Francisco en el caso real
-- ☐ Otros métodos de eje de inserción en la app: plano de la vista, flecha (etapa 5)
+- ✅ `guia` en el caso real con la curva CC y el plano oclusal de Francisco: válida en dento y dentomucosoportada (eje de inserción a 18,2° del implante)
+- ✅ Carcasa desde la curva sin puente; holgura de 1 mm sobre la encía solo en dentosoportada
+- ☐ Informe de ajuste guía–escaneo antes de imprimir (portar `ajuste.py` del módulo GuiaCorte)
+- ☐ Otros métodos de eje de inserción en la app: plano de la vista, flecha, búsqueda del eje con menos undercut (`buscar_eje` de GuiaCorte) (etapa 5)
+- ☐ Problemas de los módulos externos de Slicer, para corregirlos en sus proyectos: `docs/problemas-modulos-externos.md`
 
 ## Etapa 4 — Validación en fantoma ☐
 

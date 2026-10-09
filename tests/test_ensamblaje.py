@@ -130,8 +130,10 @@ def _caja(limites):
     cubo.SetBounds(*limites)
     tri = vtk.vtkTriangleFilter()
     tri.SetInputConnection(cubo.GetOutputPort())
-    tri.Update()
-    return tri.GetOutput()
+    limpio = vtk.vtkCleanPolyData()                 # vtkCubeSource repite vértices por cara: se unen para cerrar
+    limpio.SetInputConnection(tri.GetOutputPort())
+    limpio.Update()
+    return limpio.GetOutput()
 
 
 @pytest.fixture(scope="module")
@@ -143,7 +145,8 @@ def guia_arcada():
     for limites in ((5, 11, -3, 3, -1, 8), (-11, -5, -3, 3, -1, 8)):
         escaneo = booleana(escaneo, _caja(limites), "union", spacing=0.15)
     puntos = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData())
-    limites_usuario = (np.abs(puntos[:, 0]) >= 5) & (np.abs(puntos[:, 0]) <= 12) & (puntos[:, 2] > -0.5)
+    # Como una curva del usuario: los dos dientes y la brecha entre ellos.
+    limites_usuario = (np.abs(puntos[:, 0]) <= 12) & (puntos[:, 2] > -0.5)
     implante = Implante(4.1, 10.0, [0, 0, -12.0], [0, 0, 1])
     r = guia_quirurgica(escaneo, leer_stl(CASOS_DORADOS / "dientes_arcada_recta.stl"), implante, ONEGUIDE,
                         "impresa", limites_usuario, [0, 0, 1])
@@ -151,10 +154,20 @@ def guia_arcada():
 
 
 def test_guia_completa_es_valida(guia_arcada):
-    """Verifica R-021: apoyo + puente + anillo ensamblados dan una sola pieza cerrada que se inserta."""
+    """Verifica R-021: carcasa de los límites del usuario + anillo, sin puente, dan una sola pieza cerrada que se inserta."""
     _, r = guia_arcada
     assert r["valida"], r["problemas"]
     assert r["metricas"]["piezas"] == 1
+    assert r["con_puente"] is False
+
+
+def test_dentosoportada_levanta_la_carcasa_sobre_la_encia(guia_arcada):
+    """Verifica R-020 y R-021: en la brecha la cara interna queda 1 mm sobre la encía (holgura del kit) y sobre los dientes a la tolerancia."""
+    escaneo, r = guia_arcada
+    encia = _cortes(escaneo, [0, -4, 30], [0, -4, -5])[0][2]
+    assert _cortes(r["guia"], [0, -4, 0.0], [0, -4, 30])[0][2] - encia == pytest.approx(1.0, abs=0.05)
+    diente = _cortes(escaneo, [8, 0, 30], [8, 0, -5])[0][2]
+    assert _cortes(r["guia"], [8, 0, diente], [8, 0, 30])[0][2] - diente == pytest.approx(0.2, abs=0.05)
 
 
 def test_guia_completa_conserva_anillo_y_orificio(guia_arcada):
@@ -162,7 +175,7 @@ def test_guia_completa_conserva_anillo_y_orificio(guia_arcada):
     _, r = guia_arcada
     g = r["guia"]
     assert _cortes(g, [0, -4, 30], [0, -4, 0])[0][2] == pytest.approx(8.5, abs=0.05)
-    for direccion in ([0, -1, 0], [0, 1, 0], [-0.6, -0.8, 0]):
+    for direccion in ([0, -1, 0], [0, 1, 0]):              # hacia ±y: lejos de la carcasa de los dientes
         cortes = _cortes(g, [0, 0, 7], 20 * np.array(direccion) + [0, 0, 7])
         radios = np.linalg.norm(cortes[:, :2], axis=1)
         assert radios[0] == pytest.approx(5.3 / 2, abs=0.05)
@@ -176,6 +189,57 @@ def test_guia_completa_no_entra_en_el_escaneo(guia_arcada):
     escaneo, r = guia_arcada
     puntos = numpy_support.vtk_to_numpy(r["guia"].GetPoints().GetData())
     assert not _dentro(escaneo, puntos).any()
+
+
+def test_holgura_sobre_encia_en_rampa():
+    """Verifica R-020 y R-021: 1 mm sobre la encía lejos de los dientes, 0 sobre los dientes y valores intermedios en la transición."""
+    from nucleo_dental.ensamblaje import holgura_sobre_encia
+
+    escaneo = leer_stl(CASOS_DORADOS / "escaneo_arcada_recta.stl")
+    puntos = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData())
+    h = holgura_sobre_encia(escaneo, leer_stl(CASOS_DORADOS / "dientes_arcada_recta.stl"), 1.0)
+    lejos = (np.abs(puntos[:, 0]) < 3) & (puntos[:, 2] == 0)                          # encía de la brecha
+    oclusal = (puntos[:, 0] > 6) & (puntos[:, 0] < 10) & (np.abs(puntos[:, 1]) < 2) & (puntos[:, 2] == 8)
+    assert np.allclose(h[lejos], 1.0) and np.allclose(h[oclusal], 0.0)
+    assert ((h > 0.05) & (h < 0.95)).any()
+    assert h.min() >= 0 and h.max() <= 1.0
+
+
+def test_parche_a_solido_con_desfase_por_vertice():
+    """Verifica R-021: el desfase puede variar por vértice (array del parche): cada punto sube lo suyo."""
+    from nucleo_dental.geometria.malla_guia import parche_a_solido
+
+    plano = vtk.vtkPlaneSource()
+    plano.SetOrigin(0, 0, 0)
+    plano.SetPoint1(10, 0, 0)
+    plano.SetPoint2(0, 10, 0)
+    plano.SetResolution(10, 10)
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(plano.GetOutputPort())
+    tri.Update()
+    parche = tri.GetOutput()
+    x = numpy_support.vtk_to_numpy(parche.GetPoints().GetData())[:, 0]
+    arreglo = numpy_support.numpy_to_vtk(np.where(x < 5, 0.0, 1.0), deep=True)
+    arreglo.SetName("Holgura")
+    parche.GetPointData().AddArray(arreglo)
+    solido = parche_a_solido(parche, 3.0, desfase="Holgura")
+    assert _cortes(solido, [2, 5, -5], [2, 5, 10])[0][2] == pytest.approx(0.0, abs=1e-6)
+    assert _cortes(solido, [8, 5, -5], [8, 5, 10])[0][2] == pytest.approx(1.0, abs=1e-6)
+    assert _cortes(solido, [8, 5, 10], [8, 5, -5])[0][2] == pytest.approx(4.0, abs=1e-6)
+
+
+def test_astillas_sueltas_se_descartan():
+    """Verifica R-021: una pieza suelta menor que el volumen mínimo se descarta y se informa; una mayor queda y la guía no es válida."""
+    from nucleo_dental.geometria.malla_guia import booleana
+
+    diente = _caja((-3, 3, -3, 3, -5, 0))
+    base = _caja((-3, 3, -3, 3, 0.2, 3.2))
+    con_astilla = ensamblar([base, _caja((5, 5.5, 0, 0.5, 1, 1.5))], diente, [0, 0, 1], 0.2)
+    assert con_astilla["valida"], con_astilla["problemas"]
+    assert con_astilla["metricas"]["astillas_descartadas"] == 1
+    assert con_astilla["metricas"]["volumen_astillas_mm3"] == pytest.approx(0.125, abs=0.05)
+    con_pieza = ensamblar([base, _caja((5, 7, 0, 2, 1, 3))], diente, [0, 0, 1], 0.2)
+    assert not con_pieza["valida"] and con_pieza["metricas"]["piezas"] == 2
 
 
 def test_comando_guia_faltan_parametros(capsys):

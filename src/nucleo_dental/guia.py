@@ -114,6 +114,25 @@ def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabri
     puente = parche_a_solido(encia, kit.espesor_plantilla_mm, desfase=holgura,
                              suavizado_normales=_SUAVIZADO_NORMALES)
 
+    return {"geometria": g, "tipo_soporte": tipo_soporte, "holgura_encia_mm": holgura, "puente": puente,
+            "alcance_puente_mm": float(alcance), **_columna_y_alivio(g, cresta, holgura, implante, kit)}
+
+
+def columna_del_anillo(escaneo, implante: Implante, kit: PerfilKit, fabricacion: str, holgura_mm: float) -> dict:
+    """Columna del anillo (y alivio) sin puente, para una carcasa que ya cubre la brecha (R-021).
+
+    La cresta es el primer cruce del escaneo bajando por el eje desde la cara
+    superior; la columna nace `holgura_mm` sobre ella, donde queda la cara
+    interna de la carcasa.
+    """
+    g = geometria_orificio(implante, kit, fabricacion)
+    cresta = _cruce_del_eje(escaneo, implante, np.array(g["cara_superior"]))
+    return {"geometria": g, "holgura_encia_mm": float(holgura_mm),
+            **_columna_y_alivio(g, cresta, float(holgura_mm), implante, kit)}
+
+
+def _columna_y_alivio(g: dict, cresta, holgura: float, implante: Implante, kit: PerfilKit) -> dict:
+    """Columna del diámetro externo del anillo desde el piso hasta la cara superior, y el alivio si lo hay."""
     piso_en_eje = cresta + holgura * implante.eje
     techo_en_eje = piso_en_eje + kit.espesor_plantilla_mm * implante.eje
     cara_superior = np.array(g["cara_superior"])
@@ -132,13 +151,8 @@ def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabri
         contacto = kit.contacto_mm
 
     return {
-        "geometria": g,
-        "tipo_soporte": tipo_soporte,
-        "holgura_encia_mm": holgura,
-        "puente": puente,
         "columna": columna,
         "alivio": alivio,
-        "alcance_puente_mm": float(alcance),
         "cresta_en_eje": cresta.tolist(),
         "piso_en_eje": piso_en_eje.tolist(),
         "techo_en_eje": techo_en_eje.tolist(),
