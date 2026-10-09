@@ -97,6 +97,75 @@ def test_con_camisa_el_orificio_es_el_externo_de_la_camisa():
     assert g["diametro_orificio_mm"] == pytest.approx(7.3)
 
 
+def _cerrada(malla) -> bool:
+    bordes = vtk.vtkFeatureEdges()
+    bordes.SetInputData(malla)
+    bordes.BoundaryEdgesOn()
+    bordes.NonManifoldEdgesOn()
+    bordes.FeatureEdgesOff()
+    bordes.ManifoldEdgesOff()
+    bordes.Update()
+    return bordes.GetOutput().GetNumberOfCells() == 0
+
+
+def test_parche_a_solido_cuadrado_plano():
+    """Verifica R-018: un parche plano de 10 x 10 mm con grosor 3 da un sólido cerrado de 300 mm³ (z de 0 a 3)."""
+    from nucleo_dental.geometria.malla_guia import parche_a_solido
+
+    plano = vtk.vtkPlaneSource()
+    plano.SetOrigin(0, 0, 0)
+    plano.SetPoint1(10, 0, 0)
+    plano.SetPoint2(0, 10, 0)
+    plano.SetResolution(20, 20)
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(plano.GetOutputPort())
+    tri.Update()
+    solido = parche_a_solido(tri.GetOutput(), 3.0)
+    assert _cerrada(solido)
+    masa = vtk.vtkMassProperties()
+    masa.SetInputData(solido)
+    masa.Update()
+    assert masa.GetVolume() == pytest.approx(300.0, rel=1e-6)
+    z = np.array(solido.GetBounds())[4:]
+    assert abs(z[1] - z[0]) == pytest.approx(3.0)
+
+
+def test_caso_dorado_016_puente_y_columna():
+    """Verifica R-019: piso del puente 1 mm sobre la encía, techo a 3 mm, columna hasta la cara superior (8,5), alto 4,5."""
+    from nucleo_dental.guia import puente_y_columna
+    from nucleo_dental.medicion import leer_stl
+
+    carpeta = CASOS_DORADOS / "guia" / "caso_016_puente"
+    caso = json.loads((carpeta / "caso.json").read_text(encoding="utf-8"))
+    e = json.loads((carpeta / "esperado.json").read_text(encoding="utf-8"))
+    tol = e["tolerancia_mm"]
+    r = puente_y_columna(leer_stl(carpeta / caso["escaneo"]), leer_stl(carpeta / caso["dientes"]),
+                         _implante(caso["implante"]), obtener_kit(caso["kit"]), caso["fabricacion"])
+
+    assert r["geometria"]["plataforma"][2] == pytest.approx(e["plataforma_z"], abs=tol)
+    assert r["geometria"]["cara_superior"][2] == pytest.approx(e["cara_superior_z"], abs=tol)
+    zp = np.array(r["puente"].GetBounds())[4:]
+    assert zp[0] == pytest.approx(e["piso_puente_z"], abs=tol)
+    assert zp[1] == pytest.approx(e["techo_puente_z"], abs=tol)
+    assert r["alto_columna_mm"] == pytest.approx(e["alto_columna_mm"], abs=tol)
+    zc = np.array(r["columna"].GetBounds())[4:]
+    assert zc[1] == pytest.approx(e["cara_superior_z"], abs=tol)
+    assert zc[0] <= e["techo_puente_z"] + tol                       # la columna se une al puente
+    assert _cerrada(r["puente"]) and _cerrada(r["columna"])
+
+
+def test_contacto_efectivo_sin_alivio():
+    """Verifica R-019: sin alivio, el contacto guía–fresa va del piso del puente a la cara superior (8,5 - 1 = 7,5 mm)."""
+    from nucleo_dental.guia import puente_y_columna
+    from nucleo_dental.medicion import leer_stl
+
+    carpeta = CASOS_DORADOS / "guia" / "caso_016_puente"
+    caso = json.loads((carpeta / "caso.json").read_text(encoding="utf-8"))
+    r = puente_y_columna(leer_stl(carpeta / caso["escaneo"]), leer_stl(carpeta / caso["dientes"]),
+                         _implante(caso["implante"]), obtener_kit(caso["kit"]), caso["fabricacion"])
+    assert r["contacto_efectivo_mm"] == pytest.approx(7.5, abs=0.05)
+
+
 def test_mallas_del_anillo_y_del_orificio():
     """Verifica R-018: el anillo es un cilindro cerrado de Ø11,3 entre z 21,5 y 24,5; el orificio de Ø5,3 atraviesa más allá."""
     implante, kit, fabricacion, e = _caso_015()

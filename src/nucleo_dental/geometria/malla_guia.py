@@ -447,48 +447,33 @@ def parche_a_solido(parche: vtk.vtkPolyData,
     warp.Update()
     externo = warp.GetOutput()
 
+    # Vectorizado con numpy (regla 6): sin bucles Python sobre puntos ni caras.
     n_pts = parche.GetNumberOfPoints()
+    coordenadas = np.vstack([numpy_support.vtk_to_numpy(parche.GetPoints().GetData()),
+                             numpy_support.vtk_to_numpy(externo.GetPoints().GetData())]).astype(float)
 
-    puntos = vtk.vtkPoints()
-    puntos.SetNumberOfPoints(n_pts * 2)
-    for i in range(n_pts):
-        puntos.SetPoint(i, parche.GetPoint(i))
-        puntos.SetPoint(i + n_pts, externo.GetPoint(i))
-
-    celdas = vtk.vtkCellArray()
-
-    for c in range(parche.GetNumberOfCells()):
-        celda = parche.GetCell(c)
-        if celda.GetNumberOfPoints() != 3:
-            continue
-        ids = [celda.GetPointId(k) for k in range(3)]
-        # intrados: winding invertido para que la normal salga del solido
-        celdas.InsertNextCell(3)
-        for pid in reversed(ids):
-            celdas.InsertCellPoint(pid)
-        # extrados: winding original, desplazado
-        celdas.InsertNextCell(3)
-        for pid in ids:
-            celdas.InsertCellPoint(pid + n_pts)
+    desplazamientos_celdas = numpy_support.vtk_to_numpy(parche.GetPolys().GetOffsetsArray())
+    conectividad = numpy_support.vtk_to_numpy(parche.GetPolys().GetConnectivityArray())
+    es_triangulo = np.diff(desplazamientos_celdas) == 3
+    triangulos = np.stack([conectividad[desplazamientos_celdas[:-1][es_triangulo] + k] for k in range(3)], axis=1)
+    intrados = triangulos[:, ::-1]                 # winding invertido: la normal sale del sólido
+    extrados = triangulos + n_pts                  # winding original, desplazado
 
     aristas = _aristas_borde_con_ids(parche)
     ids_orig = aristas.GetPointData().GetArray("idsOrig")
     if ids_orig is None:
         raise RuntimeError("No se pudieron recuperar los ids de borde.")
-    for c in range(aristas.GetNumberOfCells()):
-        celda = aristas.GetCell(c)
-        if celda.GetNumberOfPoints() != 2:
-            continue
-        a = int(ids_orig.GetTuple1(celda.GetPointId(0)))
-        b = int(ids_orig.GetTuple1(celda.GetPointId(1)))
-        celdas.InsertNextCell(3)
-        celdas.InsertCellPoint(a)
-        celdas.InsertCellPoint(b)
-        celdas.InsertCellPoint(b + n_pts)
-        celdas.InsertNextCell(3)
-        celdas.InsertCellPoint(a)
-        celdas.InsertCellPoint(b + n_pts)
-        celdas.InsertCellPoint(a + n_pts)
+    originales = numpy_support.vtk_to_numpy(ids_orig).astype(np.int64)
+    lineas = numpy_support.vtk_to_numpy(aristas.GetLines().GetConnectivityArray()).reshape(-1, 2)
+    a, b = originales[lineas[:, 0]], originales[lineas[:, 1]]
+    costillas = np.vstack([np.stack([a, b, b + n_pts], axis=1), np.stack([a, b + n_pts, a + n_pts], axis=1)])
+
+    todos = np.vstack([intrados, extrados, costillas]).astype(np.int64)
+    puntos = vtk.vtkPoints()
+    puntos.SetData(numpy_support.numpy_to_vtk(coordenadas, deep=True))
+    celdas = vtk.vtkCellArray()
+    celdas.SetData(numpy_support.numpy_to_vtkIdTypeArray(np.arange(0, 3 * len(todos) + 1, 3, dtype=np.int64), deep=True),
+                   numpy_support.numpy_to_vtkIdTypeArray(todos.ravel(), deep=True))
 
     solido = vtk.vtkPolyData()
     solido.SetPoints(puntos)

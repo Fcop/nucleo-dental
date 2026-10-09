@@ -1,0 +1,9 @@
+{
+  "plataforma_z": -2.0,
+  "cara_superior_z": 8.5,
+  "piso_puente_z": 1.0,
+  "techo_puente_z": 4.0,
+  "alto_columna_mm": 4.5,
+  "tolerancia_mm": 0.05,
+  "origen": "Francisco, 2026-10-09: plataforma -2, piso 1 y techo 4 calculados por él; cara superior 8,5 y alto de columna 4,5 confirmados por él tras corregir dos confusiones (había respondido 15,3 y 11,3)."
+}

@@ -1,0 +1,7 @@
+{
+  "escaneo": "../../escaneo_arcada_recta.stl",
+  "dientes": "../../dientes_arcada_recta.stl",
+  "implante": {"diametro": 4.1, "largo": 10.0, "apice": [0, 0, -12.0], "eje": [0, 0, 1]},
+  "kit": "oneguide",
+  "fabricacion": "impresa"
+}
