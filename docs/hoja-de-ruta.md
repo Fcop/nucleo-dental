@@ -30,6 +30,7 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ☐ Pincel y edición interactiva de la región (etapa 5, en la app)
 - ✅ Perfil de kit configurable y anillo guía con orificio (R-018): OneGuide; caso dorado 015
 - ✅ Puente sobre la brecha y columna del orificio (R-019): caso dorado 016; caso real generado para revisión visual
+- ✅ Tipos de soporte (dento, dentomuco, muco), profundidad del puente (6 mm) y alivio configurables (R-020)
 - ☐ Eje de inserción, eliminación de undercuts y tolerancia de ajuste
 - ☐ Validación geométrica y exportación de STL imprimible
 

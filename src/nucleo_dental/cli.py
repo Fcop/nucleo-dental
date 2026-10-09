@@ -133,6 +133,8 @@ def _crear_parser() -> argparse.ArgumentParser:
     a.add_argument("--apice-hacia", help="Modo automático: 'abajo' o 'arriba' (ver medir).")
     a.add_argument("--radio", help="Modo automático: radio en mm desde el eje del implante (por defecto 24).")
     a.add_argument("--margen-encia", help="Modo automático: distancia mínima a la encía en mm (por defecto 1).")
+    a.add_argument("--soporte", help="Modo automático: dentosoportada (por defecto), dentomucosoportada o "
+                                      "mucosoportada (esta última no necesita --dientes).")
     a.add_argument("--curva", help="Modo curva: curva cerrada dibujada en Slicer (.mrk.json, LPS o RAS declarado).")
     a.add_argument("--punto-interior", help="Modo curva: punto x,y,z (LPS) dentro de la región; por defecto el centro de la curva.")
     a.add_argument("--salida", help="Ruta donde guardar el parche de apoyo (STL).")
@@ -161,21 +163,25 @@ def _apoyo(args) -> dict:
         informe = {"modo": "curva", "puntos_curva": len(puntos_curva)}
         parametros = {"curva": str(ruta_curva), "punto_interior": interior}
         archivos.append(ruta_curva)
-    elif args.dientes is not None:
+    elif args.dientes is not None or args.soporte == "mucosoportada":
         faltan = [f"--{n.replace('_', '-')}" for n in ("implante_stl", "apice_hacia") if getattr(args, n) is None]
         if faltan:
             raise ErrorEntrada("el modo automático necesita: " + ", ".join(faltan))
-        ruta_dientes, ruta_implante = Path(args.dientes), Path(args.implante_stl)
+        ruta_dientes = Path(args.dientes) if args.dientes is not None else None
+        ruta_implante = Path(args.implante_stl)
+        soporte = args.soporte or "dentosoportada"
         implante = Implante.desde_malla(leer_stl(ruta_implante), args.apice_hacia)
         radio = RADIO_APOYO_POR_DEFECTO_MM if args.radio is None else _numero(args.radio, "--radio")
         margen_encia = 1.0 if args.margen_encia is None else _numero(args.margen_encia, "--margen-encia")
-        region = region_automatica(escaneo, leer_stl(ruta_dientes), implante.apice, implante.eje,
-                                   radio_mm=radio, margen_encia_mm=margen_encia)
+        region = region_automatica(escaneo, leer_stl(ruta_dientes) if ruta_dientes else None,
+                                   implante.apice, implante.eje, radio_mm=radio, margen_encia_mm=margen_encia,
+                                   tipo_soporte=soporte)
         mascara = region["mascara"]
         informe = {"modo": "automatico", "altura_minima_sobre_encia_mm": region["altura_minima_sobre_encia_mm"]}
-        parametros = {"dientes": str(ruta_dientes), "implante_stl": str(ruta_implante),
+        parametros = {"dientes": str(ruta_dientes) if ruta_dientes else None, "tipo_soporte": soporte,
+                      "implante_stl": str(ruta_implante),
                       "apice_hacia": args.apice_hacia, "radio_mm": radio, "margen_encia_mm": margen_encia}
-        archivos += [ruta_dientes, ruta_implante]
+        archivos += [r for r in (ruta_dientes, ruta_implante) if r is not None]
     else:
         raise ErrorEntrada("indica el modo: --curva curva.mrk.json, o --dientes con --implante-stl y --apice-hacia")
 

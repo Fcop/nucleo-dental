@@ -25,6 +25,8 @@ class PerfilKit:
     ajuste_fabricacion_mm: dict = field(default_factory=dict)   # holgura del orificio según método
     con_camisa: bool = False
     pared_camisa_mm: float = 1.0
+    alivio_mm: float = 0.0                 # ensanche del orificio bajo el anillo (0 = sin alivio)
+    profundidad_puente_mm: float = 6.0     # hasta dónde baja el puente bajo la cresta, a lo largo del eje
     provisionales: frozenset = frozenset()
     fuente: str = ""
 
@@ -55,6 +57,8 @@ ONEGUIDE = PerfilKit(
     sobrefresado_mm=0.3,
     ajuste_fabricacion_mm={"impresa": 0.3, "fresada": 0.1},
     con_camisa=False,
+    alivio_mm=0.0,
+    profundidad_puente_mm=6.0,
     provisionales=frozenset({"sobrefresado_mm"}),
     fuente=("Catálogo y manual Hiossen OneGuide (orificios Ø5,0/Ø5,7, contacto 3 mm, sin camisa); "
             "offset, espesor, pared, holgura, ajustes y sobrefresado: decisiones clínicas 2026-10-08"),

@@ -217,6 +217,19 @@ def test_comando_apoyo_errores(extra, texto):
     assert texto in stderr
 
 
+def test_comando_apoyo_mucosoportada_sin_dientes(tmp_path):
+    """Verifica R-020: `apoyo --soporte mucosoportada` funciona sin --dientes y apoya en la mucosa."""
+    from test_medir import ejecutar
+
+    codigo, salida, stderr = ejecutar(
+        "apoyo", "--escaneo", CASOS_DORADOS / "escaneo_arcada_recta.stl", "--soporte", "mucosoportada",
+        "--implante-stl", _implante_eje_x0(tmp_path), "--apice-hacia", "abajo", "--radio", "4")
+    assert codigo == 0, stderr
+    assert salida["parametros"]["tipo_soporte"] == "mucosoportada"
+    assert salida["parametros"]["dientes"] is None
+    assert salida["apoyo"]["area_mm2"] > 0
+
+
 def vtk_mass(parche):
     import vtk
 
@@ -224,6 +237,37 @@ def vtk_mass(parche):
     masa.SetInputData(parche)
     masa.Update()
     return masa.GetSurfaceArea()
+
+
+def test_dentomucosoportada_incluye_dientes_y_mucosa():
+    """Verifica R-020: en una guía dentomucosoportada la región incluye la oclusal de los dientes y la mucosa (z = 0)."""
+    caso, _, escaneo, dientes = _cargar_012()
+    puntos = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData()).astype(float)
+    r = region_automatica(escaneo, dientes, caso["eje"]["punto"], caso["eje"]["direccion"],
+                          radio_mm=20.0, tipo_soporte="dentomucosoportada")
+    sel = puntos[r["mascara"]]
+    assert (np.isclose(sel[:, 2], 8.0)).any()
+    assert (np.isclose(sel[:, 2], 0.0)).any()
+
+
+def test_mucosoportada_solo_mucosa_y_sin_dientes():
+    """Verifica R-020: en una guía mucosoportada la región es solo mucosa; los dientes del CBCT son opcionales."""
+    caso, _, escaneo, dientes = _cargar_012()
+    puntos = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData()).astype(float)
+    con = region_automatica(escaneo, dientes, caso["eje"]["punto"], caso["eje"]["direccion"],
+                            radio_mm=20.0, tipo_soporte="mucosoportada")
+    assert not np.isclose(puntos[con["mascara"], 2], 8.0).any()
+    assert np.isclose(puntos[con["mascara"], 2], 0.0).all()
+    sin = region_automatica(escaneo, None, caso["eje"]["punto"], caso["eje"]["direccion"],
+                            radio_mm=20.0, tipo_soporte="mucosoportada")
+    assert sin["mascara"].any()
+
+
+def test_dentosoportada_sin_dientes_es_error():
+    """Verifica R-020: la región dentosoportada necesita los dientes del CBCT."""
+    caso, _, escaneo, _ = _cargar_012()
+    with pytest.raises(ValueError, match="dientes"):
+        region_automatica(escaneo, None, caso["eje"]["punto"], caso["eje"]["direccion"])
 
 
 def test_radio_por_defecto_es_24_mm():

@@ -166,6 +166,94 @@ def test_contacto_efectivo_sin_alivio():
     assert r["contacto_efectivo_mm"] == pytest.approx(7.5, abs=0.05)
 
 
+def _puente_016(**opciones):
+    from nucleo_dental.guia import puente_y_columna
+    from nucleo_dental.medicion import leer_stl
+
+    carpeta = CASOS_DORADOS / "guia" / "caso_016_puente"
+    caso = json.loads((carpeta / "caso.json").read_text(encoding="utf-8"))
+    kit = opciones.pop("kit", obtener_kit(caso["kit"]))
+    return puente_y_columna(leer_stl(carpeta / caso["escaneo"]), leer_stl(carpeta / caso["dientes"]),
+                            _implante(caso["implante"]), kit, caso["fabricacion"], **opciones)
+
+
+@pytest.mark.parametrize("tipo", ["dentomucosoportada", "mucosoportada"])
+def test_apoyo_en_mucosa_sin_holgura(tipo):
+    """Verifica R-020: si la guía apoya en mucosa no hay holgura: piso del puente en z = 0, techo en 3, columna de 5,5 mm.
+
+    Valores derivados de la regla de Francisco (2026-10-09): "si se apoya en mucosa, este alivio no debe existir".
+    """
+    r = _puente_016(tipo_soporte=tipo)
+    zp = np.array(r["puente"].GetBounds())[4:]
+    assert zp[0] == pytest.approx(0.0, abs=0.05)
+    assert zp[1] == pytest.approx(3.0, abs=0.05)
+    assert r["alto_columna_mm"] == pytest.approx(5.5, abs=0.05)
+    assert r["contacto_efectivo_mm"] == pytest.approx(8.5, abs=0.05)
+    assert r["tipo_soporte"] == tipo
+
+
+def test_tipo_de_soporte_desconocido_es_error():
+    """Verifica R-020: solo se aceptan los tres tipos de soporte."""
+    with pytest.raises(ValueError, match="soporte"):
+        _puente_016(tipo_soporte="implantosoportada")
+
+
+def test_mucosoportada_no_necesita_dientes():
+    """Verifica R-020: una guía mucosoportada se construye sobre un escaneo sin dientes (desdentado)."""
+    from nucleo_dental.guia import puente_y_columna
+
+    plano = vtk.vtkPlaneSource()
+    plano.SetOrigin(-15, -15, 0)
+    plano.SetPoint1(15, -15, 0)
+    plano.SetPoint2(-15, 15, 0)
+    plano.SetResolution(60, 60)
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(plano.GetOutputPort())
+    tri.Update()
+    implante = Implante(4.1, 10.0, [0, 0, -12.0], [0, 0, 1])
+    r = puente_y_columna(tri.GetOutput(), None, implante, ONEGUIDE, "impresa",
+                         tipo_soporte="mucosoportada", radio_mucosa_mm=10.0)
+    zp = np.array(r["puente"].GetBounds())
+    np.testing.assert_allclose(zp[4:], [0.0, 3.0], atol=0.05)
+    assert zp[1] - zp[0] == pytest.approx(20.0, abs=0.6)          # radio 10 alrededor del eje
+
+
+def test_dentosoportada_necesita_dientes():
+    """Verifica R-020: sin dientes del CBCT no se puede delimitar una guía dentosoportada."""
+    from nucleo_dental.guia import puente_y_columna
+    from nucleo_dental.medicion import leer_stl
+
+    with pytest.raises(ValueError, match="dientes"):
+        puente_y_columna(leer_stl(CASOS_DORADOS / "escaneo_arcada_recta.stl"), None,
+                         Implante(4.1, 10.0, [0, 0, -12.0], [0, 0, 1]), ONEGUIDE, "impresa")
+
+
+def test_alivio_configurable():
+    """Verifica R-020: con alivio de 1 mm el contacto vuelve a los 3 mm del kit y se genera el alivio de Ø6,3 bajo el anillo."""
+    r = _puente_016(kit=ONEGUIDE.con(alivio_mm=1.0))
+    assert r["contacto_efectivo_mm"] == pytest.approx(3.0, abs=1e-6)
+    alivio = np.array(r["alivio"].GetBounds())
+    assert alivio[1] - alivio[0] == pytest.approx(6.3, abs=1e-6)
+    assert alivio[5] == pytest.approx(5.5, abs=1e-6)                 # llega a la cara inferior del anillo
+    assert alivio[4] <= 1.0                                           # desde el piso del puente
+    assert _puente_016()["alivio"] is None                            # sin alivio por defecto (OneGuide)
+
+
+def test_limitar_profundidad():
+    """Verifica R-020: solo quedan los puntos hasta 6 mm bajo la cresta, medidos a lo largo del eje."""
+    from nucleo_dental.guia import _hasta_profundidad
+
+    puntos = np.array([[0, 0, 0], [0, 5, -5.9], [0, 6, -6.1], [0, 8, -10]], dtype=float)
+    mascara = _hasta_profundidad(puntos, cresta=[0, 0, 0], eje=[0, 0, 1], profundidad_mm=6.0)
+    assert mascara.tolist() == [True, True, False, False]
+
+
+def test_perfil_tiene_profundidad_y_alivio():
+    """Verifica R-020: el perfil OneGuide trae profundidad de puente 6 mm y alivio 0 (decisiones clínicas 2026-10-09)."""
+    assert ONEGUIDE.profundidad_puente_mm == 6.0
+    assert ONEGUIDE.alivio_mm == 0.0
+
+
 def test_mallas_del_anillo_y_del_orificio():
     """Verifica R-018: el anillo es un cilindro cerrado de Ø11,3 entre z 21,5 y 24,5; el orificio de Ø5,3 atraviesa más allá."""
     implante, kit, fabricacion, e = _caso_015()

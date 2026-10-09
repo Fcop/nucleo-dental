@@ -51,17 +51,25 @@ def geometria_orificio(implante: Implante, kit: PerfilKit, fabricacion: str) -> 
     return resultado
 
 
+TIPOS_SOPORTE = ("dentosoportada", "dentomucosoportada", "mucosoportada")
+
+
 def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabricacion: str,
-                     solape_dientes_mm: float = 1.5) -> dict:
-    """Puente sobre la encía de la brecha y columna del orificio (R-019).
+                     solape_dientes_mm: float = 1.5, tipo_soporte: str = "dentosoportada",
+                     radio_mucosa_mm: float = 24.0) -> dict:
+    """Puente sobre la encía de la brecha y columna del orificio (R-019, R-020).
 
     Puente: la encía del escaneo alrededor del eje, hasta los dientes vecinos
-    (más `solape_dientes_mm` para que se una al apoyo), levantada
-    `kit.holgura_encia_mm` y con `kit.espesor_plantilla_mm` de espesor.
+    (más `solape_dientes_mm` para unirse al apoyo) o, en una guía
+    mucosoportada, hasta `radio_mucosa_mm`; limitada a
+    `kit.profundidad_puente_mm` bajo la cresta, a lo largo del eje. Se levanta
+    `kit.holgura_encia_mm` solo si la guía es dentosoportada: si apoya en la
+    mucosa no hay holgura (decisión clínica 2026-10-09). Espesor:
+    `kit.espesor_plantilla_mm`.
     Columna: cilindro del diámetro externo del anillo desde el piso del puente
-    hasta la cara superior del orificio. Sin alivio (decisión clínica
-    2026-10-09), la fresa roza resina desde el piso del puente hasta la cara
-    superior: ese es el contacto efectivo.
+    hasta la cara superior del orificio. Contacto efectivo guía–fresa: el del
+    kit si hay alivio (`kit.alivio_mm` > 0); si no, del piso del puente a la
+    cara superior.
     """
     import vtk
     from vtk.util import numpy_support
@@ -69,31 +77,35 @@ def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabri
     from nucleo_dental.apoyo import clasificar_diente_encia, parche_de_apoyo
     from nucleo_dental.geometria.malla_guia import parche_a_solido
 
+    if tipo_soporte not in TIPOS_SOPORTE:
+        raise ValueError(f"Tipo de soporte desconocido '{tipo_soporte}'; opciones: " + ", ".join(TIPOS_SOPORTE))
     g = geometria_orificio(implante, kit, fabricacion)
     puntos = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData()).astype(float)
-    es_diente = clasificar_diente_encia(escaneo, dientes)
-    if not es_diente.any():
-        raise ValueError("Ningún punto del escaneo coincide con los dientes del CBCT: revisa el registro.")
     relativo = puntos - implante.apice
     radial = np.linalg.norm(relativo - np.outer(relativo @ implante.eje, implante.eje), axis=1)
-    alcance = radial[es_diente].min() + solape_dientes_mm
-    encia_brecha = parche_de_apoyo(escaneo, (~es_diente) & (radial <= alcance), solo_mayor=True)
 
-    # Normales hacia afuera del tejido (mismo sentido que el eje, hacia la plataforma).
-    encia_brecha = _orientar_hacia(encia_brecha, implante.eje)
-    piso = _desplazar(encia_brecha, kit.holgura_encia_mm)
+    if tipo_soporte == "mucosoportada":
+        es_diente = (clasificar_diente_encia(escaneo, dientes) if dientes is not None
+                     else np.zeros(len(puntos), dtype=bool))
+        alcance = float(radio_mucosa_mm)
+    else:
+        if dientes is None:
+            raise ValueError(f"Una guía {tipo_soporte} necesita los dientes del CBCT para delimitarse.")
+        es_diente = clasificar_diente_encia(escaneo, dientes)
+        if not es_diente.any():
+            raise ValueError("Ningún punto del escaneo coincide con los dientes del CBCT: revisa el registro.")
+        alcance = radial[es_diente].min() + solape_dientes_mm
+    holgura = kit.holgura_encia_mm if tipo_soporte == "dentosoportada" else 0.0
+
+    mascara = (~es_diente) & (radial <= alcance)
+    encia = _orientar_hacia(parche_de_apoyo(escaneo, mascara, solo_mayor=True), implante.eje)
+    cresta = _cruce_del_eje(encia, implante, np.array(g["cara_superior"]))
+    mascara &= _hasta_profundidad(puntos, cresta, implante.eje, kit.profundidad_puente_mm)
+    encia = _orientar_hacia(parche_de_apoyo(escaneo, mascara, solo_mayor=True), implante.eje)
+    piso = _desplazar(encia, holgura) if holgura > 0 else encia
     puente = parche_a_solido(piso, kit.espesor_plantilla_mm)
 
-    # Piso del puente sobre el eje: donde el eje corta la encía, más la holgura.
-    arbol = vtk.vtkOBBTree()
-    arbol.SetDataSet(encia_brecha)
-    arbol.BuildLocator()
-    cortes = vtk.vtkPoints()
-    arbol.IntersectWithLine(implante.apice, np.array(g["cara_superior"]), cortes, None)
-    if cortes.GetNumberOfPoints() == 0:
-        raise ValueError("El eje del implante no atraviesa la encía de la brecha en el escaneo.")
-    encia_en_eje = np.array(cortes.GetPoint(0))
-    piso_en_eje = encia_en_eje + kit.holgura_encia_mm * implante.eje
+    piso_en_eje = cresta + holgura * implante.eje
     techo_en_eje = piso_en_eje + kit.espesor_plantilla_mm * implante.eje
     cara_superior = np.array(g["cara_superior"])
     alto_piso = float((cara_superior - piso_en_eje) @ implante.eje)
@@ -101,16 +113,49 @@ def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabri
         raise ValueError("La cara superior del orificio queda dentro del puente: revisa el offset o la posición del implante.")
     columna = Implante(g["diametro_externo_anillo_mm"], alto_piso, piso_en_eje, implante.eje).como_malla()
 
+    alivio = None
+    contacto = alto_piso
+    if kit.alivio_mm > 0:
+        # Ensancha el orificio desde bajo el piso del puente hasta la cara inferior del anillo.
+        inicio = piso_en_eje - 1.0 * implante.eje
+        largo = float((np.array(g["cara_inferior_anillo"]) - inicio) @ implante.eje)
+        alivio = Implante(g["diametro_orificio_mm"] + kit.alivio_mm, largo, inicio, implante.eje).como_malla()
+        contacto = kit.contacto_mm
+
     return {
         "geometria": g,
+        "tipo_soporte": tipo_soporte,
+        "holgura_encia_mm": holgura,
         "puente": puente,
         "columna": columna,
+        "alivio": alivio,
         "alcance_puente_mm": float(alcance),
+        "cresta_en_eje": cresta.tolist(),
         "piso_en_eje": piso_en_eje.tolist(),
         "techo_en_eje": techo_en_eje.tolist(),
         "alto_columna_mm": float((cara_superior - techo_en_eje) @ implante.eje),
-        "contacto_efectivo_mm": alto_piso,
+        "contacto_efectivo_mm": float(contacto),
     }
+
+
+def _cruce_del_eje(superficie, implante: Implante, hasta) -> np.ndarray:
+    """Punto donde el eje del implante (del ápice hacia `hasta`) atraviesa la superficie."""
+    import vtk
+
+    arbol = vtk.vtkOBBTree()
+    arbol.SetDataSet(superficie)
+    arbol.BuildLocator()
+    cortes = vtk.vtkPoints()
+    arbol.IntersectWithLine(implante.apice, np.asarray(hasta, float), cortes, None)
+    if cortes.GetNumberOfPoints() == 0:
+        raise ValueError("El eje del implante no atraviesa la encía de la brecha en el escaneo.")
+    return np.array(cortes.GetPoint(0))
+
+
+def _hasta_profundidad(puntos, cresta, eje, profundidad_mm: float) -> np.ndarray:
+    """True por cada punto que no está más de `profundidad_mm` bajo la cresta, a lo largo del eje."""
+    u = np.asarray(eje, float) / np.linalg.norm(eje)
+    return (np.asarray(puntos, float) - np.asarray(cresta, float)) @ u >= -profundidad_mm
 
 
 def _orientar_hacia(parche, direccion):

@@ -86,6 +86,24 @@ _Evitar_: modelo (a secas), STL del paciente
 Movimiento rígido (rotación + traslación) que superpone el escaneo intraoral sobre los dientes del CBCT; su error pasa entero a la guía.
 _Evitar_: calce, match, fusión
 
+## Guía quirúrgica
+
+**Tipo de soporte**:
+Dónde asienta la guía: dentosoportada (solo dientes), dentomucosoportada (dientes y mucosa) o mucosoportada (solo mucosa).
+_Evitar_: apoyo (para el tipo), soporte mixto
+
+**Anillo guía**:
+Parte de la guía que rodea el orificio y guía la fresa; su cara superior está a un offset de la plataforma.
+_Evitar_: camisa (es la pieza metálica opcional), tubo, manga
+
+**Contacto efectivo**:
+Largo de resina que roza la fresa dentro del orificio; es el del kit con alivio, o del piso del puente a la cara superior sin alivio.
+_Evitar_: largo del anillo, altura de guía
+
+**Puente**:
+Parte de la guía que cruza sobre la brecha y une el anillo con el apoyo; con holgura sobre la encía solo si la guía es dentosoportada.
+_Evitar_: póntico, barra
+
 ## Validación
 
 **Caso dorado**:

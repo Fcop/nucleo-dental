@@ -62,42 +62,61 @@ def clasificar_diente_encia(escaneo: vtk.vtkPolyData, dientes: vtk.vtkPolyData,
     return es_diente
 
 
-def region_automatica(escaneo: vtk.vtkPolyData, dientes: vtk.vtkPolyData, punto_eje, direccion_eje,
-                      radio_mm: float = RADIO_APOYO_POR_DEFECTO_MM, margen_encia_mm: float = 1.0) -> dict:
-    """Región de apoyo propuesta automáticamente.
+def region_automatica(escaneo: vtk.vtkPolyData, dientes, punto_eje, direccion_eje,
+                      radio_mm: float = RADIO_APOYO_POR_DEFECTO_MM, margen_encia_mm: float = 1.0,
+                      tipo_soporte: str = "dentosoportada") -> dict:
+    """Región de apoyo propuesta automáticamente, según el tipo de soporte (R-016, R-020).
 
-    Superficie dental del escaneo a menos de `radio_mm` del eje del implante
-    (medido perpendicular al eje) y a no menos de `margen_encia_mm` de la encía.
+    dentosoportada:     superficie dental a menos de `radio_mm` del eje y a no
+                        menos de `margen_encia_mm` de la encía;
+    dentomucosoportada: superficie dental y mucosa a menos de `radio_mm`;
+    mucosoportada:      solo mucosa a menos de `radio_mm` (los dientes del CBCT
+                        son opcionales; si se dan, se excluyen).
     """
+    from nucleo_dental.guia import TIPOS_SOPORTE
+
+    if tipo_soporte not in TIPOS_SOPORTE:
+        raise ValueError(f"Tipo de soporte desconocido '{tipo_soporte}'; opciones: " + ", ".join(TIPOS_SOPORTE))
     for nombre, valor in (("radio_mm", radio_mm), ("margen_encia_mm", margen_encia_mm)):
         if not np.isfinite(valor) or valor < 0:
             raise ValueError(f"{nombre} debe ser un número mayor o igual que 0 (se recibió {valor}).")
     puntos = _puntos(escaneo)
-    es_diente = clasificar_diente_encia(escaneo, dientes)
-    if not es_diente.any():
-        raise ValueError("Ningún punto del escaneo coincide con los dientes del CBCT: revisa el registro.")
-
-    distancia_encia = np.full(len(puntos), np.inf)
-    encia = _submalla(escaneo, ~es_diente)
-    if encia is not None:
-        distancia_encia[es_diente] = _distancia_a(encia)(puntos[es_diente])
+    if dientes is None:
+        if tipo_soporte != "mucosoportada":
+            raise ValueError(f"Una guía {tipo_soporte} necesita los dientes del CBCT.")
+        es_diente = np.zeros(len(puntos), dtype=bool)
+    else:
+        es_diente = clasificar_diente_encia(escaneo, dientes)
+        if tipo_soporte != "mucosoportada" and not es_diente.any():
+            raise ValueError("Ningún punto del escaneo coincide con los dientes del CBCT: revisa el registro.")
 
     a = np.asarray(punto_eje, dtype=float)
     u = np.asarray(direccion_eje, dtype=float)
     u = u / np.linalg.norm(u)
     relativo = puntos - a
-    radial = np.linalg.norm(relativo - np.outer(relativo @ u, u), axis=1)
+    dentro_radio = np.linalg.norm(relativo - np.outer(relativo @ u, u), axis=1) <= radio_mm
 
-    mascara = es_diente & (distancia_encia >= margen_encia_mm - _TOLERANCIA_MM) & (radial <= radio_mm)
+    distancia_encia = np.full(len(puntos), np.inf)
+    if tipo_soporte == "dentosoportada":
+        encia = _submalla(escaneo, ~es_diente)
+        if encia is not None:
+            distancia_encia[es_diente] = _distancia_a(encia)(puntos[es_diente])
+        mascara = es_diente & (distancia_encia >= margen_encia_mm - _TOLERANCIA_MM) & dentro_radio
+    elif tipo_soporte == "dentomucosoportada":
+        mascara = dentro_radio.copy()
+    else:
+        mascara = (~es_diente) & dentro_radio
     if not mascara.any():
         raise ValueError("La región de apoyo quedó vacía: aumenta el radio o reduce el margen a la encía.")
+    altura = distancia_encia[mascara].min() if tipo_soporte == "dentosoportada" else 0.0
     return {
         "mascara": mascara,
         "es_diente": es_diente,
         "puntos_region": int(mascara.sum()),
-        "altura_minima_sobre_encia_mm": float(distancia_encia[mascara].min()),
+        "altura_minima_sobre_encia_mm": float(altura),
         "radio_mm": float(radio_mm),
         "margen_encia_mm": float(margen_encia_mm),
+        "tipo_soporte": tipo_soporte,
     }
 
 
