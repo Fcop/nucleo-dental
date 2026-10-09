@@ -4,6 +4,7 @@
   "techo_interno_z": 10.2,
   "borde_inferior_pared_externa_z": 4.0,
   "insercion_antes_del_recorte": false,
+  "insercion_despues_del_recorte": true,
   "tolerancia_mm": 0.1,
-  "origen": "Francisco, 2026-10-09: choca |x| de 3 a 4 con z de 4 a 6; cara interna ±4,2; techo interno 10,2; la pared externa sigue llegando a z = 4 (la tolerancia actúa solo en la cara interna); antes del recorte la guía no puede insertarse. Tolerancia de comparación 0,1 mm (la manual del proyecto)."
+  "origen": "Francisco, 2026-10-09: choca |x| de 3 a 4 con z de 4 a 6; cara interna ±4,2; techo interno 10,2; la pared externa sigue llegando a z = 4 (la tolerancia actúa solo en la cara interna); antes del recorte la guía no puede insertarse. Después del recorte se inserta sin chocar con el diente (respondido por Francisco el 2026-10-09 sobre el corte posterior; campo agregado con su autorización explícita, sin cambiar los demás valores). Tolerancia de comparación 0,1 mm (la manual del proyecto)."
 }

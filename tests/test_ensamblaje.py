@@ -74,9 +74,9 @@ def test_caso_dorado_017_se_quita_la_zona_que_choca(caso_017):
 
 
 def test_caso_dorado_017_la_guia_ensamblada_es_valida(caso_017):
-    """Verifica R-021: la guía ensamblada es una sola pieza cerrada y se inserta sin colisión a lo largo del eje."""
-    *_, r = caso_017
-    assert r["valida"], r["problemas"]
+    """Verifica R-021: la guía ensamblada es una sola pieza cerrada y, después del recorte, se inserta sin colisión (caso 017)."""
+    _, e, _, _, r = caso_017
+    assert r["valida"] is e["insercion_despues_del_recorte"], r["problemas"]
     assert r["metricas"]["piezas"] == 1
     assert r["metricas"]["insercion"]["colision_mm3"] == 0
 
