@@ -172,3 +172,23 @@ def test_guia_real_con_curva_y_plano_oclusal(soporte):
     cortes = vtk.vtkPoints()
     arbol.IntersectWithLine(centro, centro + 10 * lado, cortes, None)
     assert np.linalg.norm(np.array(cortes.GetPoint(0)) - centro) == pytest.approx(5.3 / 2, abs=0.05)
+
+
+@pytest.mark.skipif(not all((CASO / n).is_file() for n in ("CC.mrk.json", "puntos_plano.mrk.json", "Roi_ventana.mrk.json")),
+                    reason="sin la curva, el plano oclusal o la caja de ventana de Francisco")
+def test_ventana_real_desde_roi_de_slicer():
+    """Verifica R-024 con el caso real: la caja ROI que Francisco guardó en Slicer abre la guía y la guía sigue válida."""
+    from nucleo_dental.apoyo import leer_cajas_slicer, leer_puntos_slicer, region_desde_curva
+    from nucleo_dental.ensamblaje import eje_desde_plano_oclusal, guia_quirurgica
+    from nucleo_dental.implante import Implante
+    from nucleo_dental.kits import ONEGUIDE
+
+    escaneo = leer_stl(CASO / "escaneo_registrado.stl")
+    implante = Implante.desde_malla(leer_stl(CASO / "implante.stl"), "abajo")
+    eje = eje_desde_plano_oclusal(leer_puntos_slicer(CASO / "puntos_plano.mrk.json"), implante.eje)
+    mascara = region_desde_curva(escaneo, leer_puntos_slicer(CASO / "CC.mrk.json"))
+    ventanas = leer_cajas_slicer(CASO / "Roi_ventana.mrk.json")
+    r = guia_quirurgica(escaneo, leer_stl(CASO / "Lower Teeth.stl"), implante, ONEGUIDE, "impresa", mascara, eje,
+                        tipo_soporte="dentosoportada", ventanas=ventanas)
+    assert r["valida"], r["problemas"]
+    assert [v["corta_la_guia"] for v in r["ventanas"]] == [True]
