@@ -40,7 +40,8 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ Varios implantes (R-023): semáforo implante–implante (3 mm), un anillo por implante, pared entre orificios (aviso < 1 mm, solape = no válida); caso dorado 018
 - ✅ `medir --caso` con varios implantes ("implantes" en caso.json)
 - ☐ Probar varios implantes en un caso real anonimizado (Francisco lo está preparando)
-- ☐ Ventanas de inspección para verificar el asiento de la guía (negativos sobre los dientes)
+- ✅ Ventanas de inspección (R-024): cajas ROI de Slicer que el usuario mueve y redimensiona, restadas de la guía
+- ☐ En la app (etapa 5): crear la caja con un tamaño inicial, moverla y redimensionarla sobre la guía
 - ☐ Pines de fijación al hueso, con su dirección y su camisa (clave en dentomuco y mucosoportada)
 - ☐ Texto grabado en la guía: caso, kit y posición del implante (trazabilidad)
 - ☐ Informe del protocolo quirúrgico (PDF): kit, orificio, largo de trabajo de la fresa, offset

@@ -177,6 +177,50 @@ def leer_puntos_slicer(ruta) -> np.ndarray:
     raise ValueError(f"{ruta}: falta coordinateSystem (LPS o RAS); no se adivina el sistema de coordenadas.")
 
 
+def leer_cajas_slicer(ruta) -> list:
+    """Cajas (ROI) de un archivo de marcas de Slicer (.mrk.json), en LPS: [{"centro", "ejes", "tamano"}].
+
+    `ejes` es 3×3 con los ejes de la caja en las COLUMNAS (convención del
+    esquema de marcas de Slicer: [o0, o3, o6] es el eje x de la caja) y
+    `tamano` el largo de cada arista a lo largo de esos ejes. Se respeta el
+    sistema que declara el archivo; si no lo declara no se adivina (RG-002).
+    """
+    import json
+    from pathlib import Path
+
+    ruta = Path(ruta)
+    if not ruta.is_file():
+        raise ValueError(f"No existe el archivo de cajas: {ruta}")
+    try:
+        marcas = json.loads(ruta.read_text(encoding="utf-8"))["markups"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        raise ValueError(f"{ruta} no es un archivo de marcas de Slicer válido (.mrk.json).") from None
+    cajas = []
+    for marca in marcas:
+        if marca.get("type") != "ROI":
+            continue
+        sistema = marca.get("coordinateSystem")
+        if sistema not in ("LPS", "RAS"):
+            raise ValueError(f"{ruta}: falta coordinateSystem (LPS o RAS); no se adivina el sistema de coordenadas.")
+        if marca.get("insideOut", False):
+            raise ValueError(f"{ruta}: una caja 'insideOut' no se puede usar como ventana.")
+        try:
+            centro = np.array(marca["center"], dtype=float)
+            ejes = np.array(marca.get("orientation", np.eye(3).ravel()), dtype=float).reshape(3, 3)
+            tamano = np.array(marca["size"], dtype=float)
+        except (KeyError, ValueError):
+            raise ValueError(f"{ruta}: a una caja le falta center, size u orientation válidos.") from None
+        if sistema == "RAS":                          # (x, y, z) -> (-x, -y, z), también para los ejes
+            cambio = np.diag([-1.0, -1.0, 1.0])
+            centro, ejes = cambio @ centro, cambio @ ejes
+        if np.any(tamano <= 0) or not np.allclose(ejes.T @ ejes, np.eye(3), atol=1e-4):
+            raise ValueError(f"{ruta}: caja con tamaño no positivo u orientación que no es una rotación.")
+        cajas.append({"centro": centro, "ejes": ejes, "tamano": tamano})
+    if not cajas:
+        raise ValueError(f"{ruta} no contiene ninguna caja (ROI).")
+    return cajas
+
+
 def parche_de_apoyo(escaneo: vtk.vtkPolyData, mascara: np.ndarray, solo_mayor: bool = False,
                     datos: dict | None = None) -> vtk.vtkPolyData:
     """Parche abierto del escaneo con los triángulos cuyos tres vértices están en la región.

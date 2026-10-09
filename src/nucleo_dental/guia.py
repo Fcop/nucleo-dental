@@ -267,3 +267,23 @@ def anillo_y_orificio(implante: Implante, kit: PerfilKit, fabricacion: str):
     largo = kit.contacto_mm + 2 * _PROLONGACION_ORIFICIO_MM
     orificio = Implante(g["diametro_orificio_mm"], largo, inicio, implante.eje).como_malla()
     return anillo, orificio
+
+
+def caja_como_malla(centro, ejes, tamano):
+    """Sólido cerrado de una caja: centro, ejes en las columnas de una matriz 3×3 y largo de cada arista."""
+    import vtk
+    from vtk.util import numpy_support
+
+    cubo = vtk.vtkCubeSource()
+    cubo.SetBounds(-0.5, 0.5, -0.5, 0.5, -0.5, 0.5)
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(cubo.GetOutputPort())
+    limpio = vtk.vtkCleanPolyData()                   # vtkCubeSource repite vértices por cara: se unen para cerrar
+    limpio.SetInputConnection(tri.GetOutputPort())
+    limpio.Update()
+    malla = vtk.vtkPolyData()
+    malla.DeepCopy(limpio.GetOutput())
+    unidad = numpy_support.vtk_to_numpy(malla.GetPoints().GetData()).astype(float)
+    puntos = (unidad * np.asarray(tamano, dtype=float)) @ np.asarray(ejes, dtype=float).T + np.asarray(centro, dtype=float)
+    malla.GetPoints().SetData(numpy_support.numpy_to_vtk(np.ascontiguousarray(puntos), deep=True))
+    return malla

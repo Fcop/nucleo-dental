@@ -13,7 +13,8 @@ Códigos de salida de `medir`: 0 = verde, 2 = rojo, 1 = error de entrada.
                         --salida apoyo.stl
 
     nucleo-dental guia --escaneo escaneo.stl --dientes dientes.stl --implante-stl i.stl --apice-hacia abajo
-                       --curva limites.mrk.json --plano-oclusal plano.mrk.json [--fabricacion impresa]
+                       --curva limites.mrk.json --plano-oclusal plano.mrk.json [--ventanas cajas.mrk.json]
+                       [--fabricacion impresa]
                        [--soporte dentosoportada] [--kit oneguide] --salida guia.stl
 
 Códigos de salida de `registrar` y `apoyo`: 0 = hecho, 1 = error de entrada.
@@ -161,6 +162,9 @@ def _crear_parser() -> argparse.ArgumentParser:
     g.add_argument("--curva", help="Límites de la guía: curva cerrada dibujada en Slicer (.mrk.json).")
     g.add_argument("--punto-interior", help="Punto x,y,z (LPS) dentro de la curva; por defecto su centro.")
     g.add_argument("--plano-oclusal", help="3 puntos del plano oclusal (.mrk.json): el eje de inserción es su normal.")
+    g.add_argument("--ventanas", action="append", help="Ventanas de inspección: cajas (ROI) de Slicer (.mrk.json) "
+                                                        "ubicadas y dimensionadas por el usuario; se restan de la guía. "
+                                                        "Repetir por cada archivo.")
     g.add_argument("--fabricacion", help="impresa (por defecto) o fresada: define ajuste del orificio y tolerancia.")
     g.add_argument("--soporte", help="dentosoportada (por defecto), dentomucosoportada o mucosoportada.")
     g.add_argument("--kit", help="Perfil del kit (por defecto oneguide).")
@@ -172,7 +176,7 @@ def _guia(args) -> dict:
     """Subcomando `guia` (R-021, R-022, R-023)."""
     import vtk
 
-    from nucleo_dental.apoyo import leer_puntos_slicer, region_desde_curva
+    from nucleo_dental.apoyo import leer_cajas_slicer, leer_puntos_slicer, region_desde_curva
     from nucleo_dental.ensamblaje import eje_desde_plano_oclusal, guia_quirurgica
     from nucleo_dental.kits import obtener_kit
 
@@ -185,6 +189,8 @@ def _guia(args) -> dict:
         raise ErrorEntrada("faltan parámetros: " + ", ".join(faltan))
     rutas = {n: Path(getattr(args, n)) for n in ("escaneo", "curva", "plano_oclusal")}
     rutas_implantes = [Path(r) for r in args.implante_stl]
+    rutas_ventanas = [Path(r) for r in (args.ventanas or [])]
+    ventanas = [caja for ruta in rutas_ventanas for caja in leer_cajas_slicer(ruta)]
     ruta_dientes = Path(args.dientes) if args.dientes is not None else None
     fabricacion = args.fabricacion or "impresa"
     kit = obtener_kit(args.kit or "oneguide")
@@ -196,7 +202,7 @@ def _guia(args) -> dict:
     interior = _vector(args.punto_interior, "--punto-interior") if args.punto_interior is not None else None
     mascara = region_desde_curva(escaneo, leer_puntos_slicer(rutas["curva"]), interior)
     r = guia_quirurgica(escaneo, leer_stl(ruta_dientes) if ruta_dientes else None, implantes, kit, fabricacion,
-                        mascara, eje, tipo_soporte=soporte)
+                        mascara, eje, tipo_soporte=soporte, ventanas=ventanas)
 
     ruta_salida = Path(args.salida)
     if not r["valida"]:
@@ -227,15 +233,17 @@ def _guia(args) -> dict:
         anillos.append({"implante_stl": str(ruta), "angulo_eje_insercion_grados": angulo, **pc})
     entre_implantes = (evaluar_implantes({f"implante_{i + 1}": imp for i, imp in enumerate(implantes)})
                        if len(implantes) > 1 else None)
-    archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"]]
+    archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"], *rutas_ventanas]
     return {
         "guia": {"valida": r["valida"], "problemas": r["problemas"], "avisos": r["avisos"],
                  "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
         "ajuste": ajuste,
         "geometria": {"eje_insercion": r["eje_insercion"], "tolerancia_ajuste_mm": r["tolerancia_mm"],
-                      "anillos": anillos, "paredes_entre_orificios": r["paredes_entre_orificios"]},
+                      "anillos": anillos, "paredes_entre_orificios": r["paredes_entre_orificios"],
+                      "ventanas": r["ventanas"]},
         "entre_implantes": entre_implantes,
         "parametros": {**{n: str(v) for n, v in rutas.items()}, "implantes_stl": [str(x) for x in rutas_implantes],
+                       "ventanas": [str(x) for x in rutas_ventanas],
                        "dientes": str(ruta_dientes) if ruta_dientes else None,
                        "apice_hacia": args.apice_hacia, "punto_interior": interior, "fabricacion": fabricacion,
                        "tipo_soporte": soporte, "kit": kit.nombre, "provisionales": sorted(kit.provisionales),

@@ -112,6 +112,10 @@ _Evitar_: retención, socavado (en el código y la documentación nueva)
 Separación entre la cara interna de la guía y el escaneo, según el método de fabricación.
 _Evitar_: holgura (es la del puente sobre la encía), juego, offset
 
+**Ventana de inspección**:
+Abertura en la guía, sobre un diente de apoyo, para ver si la guía asentó; la define una caja que el usuario ubica, orienta y dimensiona.
+_Evitar_: agujero, perforación (es otra cosa), visor
+
 **Pared entre orificios**:
 Resina que queda entre dos orificios vecinos cuando sus anillos se funden; bajo 1 mm es un aviso y si los orificios se solapan la guía no es válida.
 _Evitar_: tabique, puente (es otra pieza)

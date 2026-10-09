@@ -232,7 +232,7 @@ def _separacion_por_nodo(escaneo, holgura_por_vertice, d_escaneo, origen, espaci
 
 def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: str, mascara_apoyo,
                     eje_insercion, tipo_soporte: str = "dentosoportada", con_puente: bool = False,
-                    espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM) -> dict:
+                    espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM, ventanas=()) -> dict:
     """Guía completa: carcasa dentro de los límites + un anillo con su orificio por implante (R-021, R-023).
 
     `implantes` es un Implante o una lista: todos comparten el kit y el método
@@ -241,9 +241,11 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
     dentosoportada sube `kit.holgura_encia_mm` sobre la encía y apoya en los
     dientes; si apoya en mucosa no hay holgura (R-020). `con_puente` agrega el
     puente automático (R-019), pensado para una región automática que solo
-    cubre dientes y un solo implante.
+    cubre dientes y un solo implante. `ventanas` son cajas ({"centro", "ejes",
+    "tamano"}, p. ej. de apoyo.leer_cajas_slicer) que se restan de la guía:
+    ventanas de inspección que el usuario ubica y dimensiona (R-024).
     """
-    from nucleo_dental.guia import TIPOS_SOPORTE, anillo_y_orificio, columna_del_anillo, puente_y_columna
+    from nucleo_dental.guia import TIPOS_SOPORTE, anillo_y_orificio, caja_como_malla, columna_del_anillo, puente_y_columna
 
     if tipo_soporte not in TIPOS_SOPORTE:
         raise ValueError(f"Tipo de soporte desconocido '{tipo_soporte}'; opciones: " + ", ".join(TIPOS_SOPORTE))
@@ -265,6 +267,8 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
         negativos.append(anillo_y_orificio(implante, kit, fabricacion)[1])
         if pc["alivio"] is not None:
             negativos.append(pc["alivio"])
+    cajas = [caja_como_malla(v["centro"], v["ejes"], v["tamano"]) for v in ventanas]
+    negativos += cajas
     por_vertice = None
     if holgura > 0:
         if dientes is None:
@@ -275,6 +279,7 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
                           negativos=negativos, espaciado_mm=espaciado_mm, holgura_por_vertice=por_vertice)
     resultado["avisos"] = []
     resultado["paredes_entre_orificios"] = _revisar_paredes(implantes, anillos, resultado)
+    resultado["ventanas"] = _revisar_ventanas(ventanas, resultado, espaciado_mm)
     resultado.update({"anillos": [{k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")}
                                   for pc in anillos],
                       "tipo_soporte": tipo_soporte, "con_puente": con_puente, "holgura_encia_mm": holgura,
@@ -282,6 +287,27 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
     resultado["puente_y_columna"] = resultado["anillos"][0]
     _agregar_ajuste(resultado, escaneo, kit.tolerancia_ajuste(fabricacion), por_vertice)
     return resultado
+
+
+def _revisar_ventanas(ventanas, resultado: dict, espaciado: float) -> list:
+    """Por cada ventana, si corta la guía: queda superficie de la guía junto a la caja. Si no, es un aviso."""
+    from vtk.util import numpy_support
+
+    from nucleo_dental.guia import caja_como_malla
+    from nucleo_dental.medicion import _dentro
+
+    puntos = numpy_support.vtk_to_numpy(resultado["guia"].GetPoints().GetData()).astype(float)
+    informe = []
+    for i, v in enumerate(ventanas, start=1):                 # unas pocas ventanas
+        inflada = caja_como_malla(v["centro"], v["ejes"], np.asarray(v["tamano"], dtype=float) + 4 * espaciado)
+        limites = np.array(inflada.GetBounds())
+        cerca = np.all((puntos >= limites[0::2]) & (puntos <= limites[1::2]), axis=1)
+        corta = bool(cerca.any()) and bool(_dentro(inflada, puntos[cerca]).any())
+        informe.append({"ventana": i, "centro": np.asarray(v["centro"]).tolist(),
+                        "tamano": np.asarray(v["tamano"]).tolist(), "corta_la_guia": corta})
+        if not corta:
+            resultado["avisos"].append(f"La ventana {i} no toca la guía: revisa su posición.")
+    return informe
 
 
 def _revisar_paredes(implantes, anillos, resultado: dict) -> list:
