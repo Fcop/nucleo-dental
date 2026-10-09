@@ -42,7 +42,7 @@ _ARRAY_HOLGURA = "HolguraEncia"
 # Piezas sueltas por debajo de este volumen se descartan como astillas: aparecen
 # donde la cara externa se pliega sobre una fisura cóncava (caso real: 0,02 y
 # 0,08 mm³). Una pieza real de una carcasa de 3 mm supera los 3 mm³.
-# PROVISIONAL, a confirmar por Francisco.
+# Confirmado por Francisco el 2026-10-09.
 VOLUMEN_MINIMO_PIEZA_MM3 = 1.0
 # Pasadas de promedio de la marca diente/encía: la carcasa sube a la holgura en
 # una rampa de ~1 mm (aristas del escaneo de ~0,2–0,3 mm) en vez de un escalón.

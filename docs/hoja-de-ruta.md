@@ -59,6 +59,7 @@ Sesión aparte (decisión 2026-10-09): son más complejas. Varias guías que se 
 
 - ☐ Fantoma, guía impresa, implantes de prueba y CBCT posterior
 - ☐ Desviación plan vs. resultado: entrada, ápice y ángulo
+- ☐ Imprimir la guía del caso real (curva CC) y comprobar asiento e inserción
 
 ## Etapa 5 — Aplicación ☐
 
