@@ -37,8 +37,23 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ `guia` en el caso real con la curva CC y el plano oclusal de Francisco: válida en dento y dentomucosoportada (eje de inserción a 18,2° del implante)
 - ✅ Carcasa desde la curva sin puente; holgura de 1 mm sobre la encía solo en dentosoportada
 - ☐ Informe de ajuste guía–escaneo antes de imprimir (portar `ajuste.py` del módulo GuiaCorte)
+- ☐ Guías de varios implantes: una columna, orificio y alivio por implante, en el mismo ensamblaje (prioridad alta)
+- ☐ Ventanas de inspección para verificar el asiento de la guía (negativos sobre los dientes)
+- ☐ Pines de fijación al hueso, con su dirección y su camisa (clave en dentomuco y mucosoportada)
+- ☐ Texto grabado en la guía: caso, kit y posición del implante (trazabilidad)
+- ☐ Informe del protocolo quirúrgico (PDF): kit, orificio, largo de trabajo de la fresa, offset
+  (Ideas de funciones tomadas de B4D Guide3, software propietario: solo la idea, implementación propia)
 - ☐ Otros métodos de eje de inserción en la app: plano de la vista, flecha, búsqueda del eje con menos undercut (`buscar_eje` de GuiaCorte) (etapa 5)
 - ☐ Problemas de los módulos externos de Slicer, para corregirlos en sus proyectos: `docs/problemas-modulos-externos.md`
+
+## Etapa 3b — Guías apilables (stackable) ☐
+
+Sesión aparte (decisión 2026-10-09): son más complejas. Varias guías que se apilan sobre una base fijada al hueso con pines: base, reducción ósea, guía de implantes y prótesis provisional, cada una referenciada a la anterior. Referencia: https://www.3ddx.com/what-is-a-stackable-surgical-guide-and-when-do-you-need-one/
+
+- ☐ Base con pines de fijación y sus referencias de encaje
+- ☐ Guía de reducción ósea sobre la base
+- ☐ Guía de implantes apilada sobre la base
+- ☐ Transferencia a la prótesis provisional
 
 ## Etapa 4 — Validación en fantoma ☐
 
