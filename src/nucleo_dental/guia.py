@@ -103,10 +103,12 @@ def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabri
     holgura = kit.holgura_encia_mm if tipo_soporte == "dentosoportada" else 0.0
 
     mascara = (~es_diente) & (radial <= alcance)
-    encia = _orientar_hacia(parche_de_apoyo(escaneo, mascara, solo_mayor=True), implante.eje)
-    cresta = _cruce_del_eje(encia, implante, np.array(g["cara_superior"]))
+    # La cresta es el primer cruce bajando por el eje desde la cara superior, y el
+    # puente es la pieza de encía que la contiene: un escaneo cerrado también
+    # tiene la cara inferior del zócalo, que no es encía de la brecha.
+    cresta = _cruce_del_eje(parche_de_apoyo(escaneo, mascara), implante, np.array(g["cara_superior"]))
     mascara &= _margen_de_profundidad(puntos, cresta, implante.eje, kit.profundidad_puente_mm) >= 0
-    encia = _orientar_hacia(parche_de_apoyo(escaneo, mascara, solo_mayor=True), implante.eje)
+    encia = _orientar_hacia(_pieza_mas_cercana(parche_de_apoyo(escaneo, mascara), cresta), implante.eje)
     encia = _alisar_borde(encia, _PASADAS_BORDE)
     # Holgura y espesor con las mismas normales, calculadas sobre la encía (RG-017).
     puente = parche_a_solido(encia, kit.espesor_plantilla_mm, desfase=holgura,
@@ -145,18 +147,34 @@ def puente_y_columna(escaneo, dientes, implante: Implante, kit: PerfilKit, fabri
     }
 
 
-def _cruce_del_eje(superficie, implante: Implante, hasta) -> np.ndarray:
-    """Punto donde el eje del implante (del ápice hacia `hasta`) atraviesa la superficie."""
+def _cruce_del_eje(superficie, implante: Implante, desde) -> np.ndarray:
+    """Primer punto donde el eje del implante, bajando de `desde` hacia el ápice, atraviesa la superficie."""
     import vtk
 
     arbol = vtk.vtkOBBTree()
     arbol.SetDataSet(superficie)
     arbol.BuildLocator()
     cortes = vtk.vtkPoints()
-    arbol.IntersectWithLine(implante.apice, np.asarray(hasta, float), cortes, None)
+    arbol.IntersectWithLine(np.asarray(desde, float), implante.apice, cortes, None)
     if cortes.GetNumberOfPoints() == 0:
         raise ValueError("El eje del implante no atraviesa la encía de la brecha en el escaneo.")
     return np.array(cortes.GetPoint(0))
+
+
+def _pieza_mas_cercana(superficie, punto):
+    """La pieza conexa de la superficie más cercana a `punto`."""
+    import vtk
+
+    pieza = vtk.vtkPolyDataConnectivityFilter()
+    pieza.SetInputData(superficie)
+    pieza.SetExtractionModeToClosestPointRegion()
+    pieza.SetClosestPoint(*np.asarray(punto, float))
+    limpia = vtk.vtkCleanPolyData()
+    limpia.SetInputConnection(pieza.GetOutputPort())
+    limpia.Update()
+    salida = vtk.vtkPolyData()
+    salida.DeepCopy(limpia.GetOutput())
+    return salida
 
 
 def _alisar_borde(parche, pasadas: int):

@@ -1,0 +1,9 @@
+{
+  "zona_que_choca": {"x_abs_min": 3.0, "x_abs_max": 4.0, "z_min": 4.0, "z_max": 6.0},
+  "cara_interna_pared_x_abs": 4.2,
+  "techo_interno_z": 10.2,
+  "borde_inferior_pared_externa_z": 4.0,
+  "insercion_antes_del_recorte": false,
+  "tolerancia_mm": 0.1,
+  "origen": "Francisco, 2026-10-09: choca |x| de 3 a 4 con z de 4 a 6; cara interna ±4,2; techo interno 10,2; la pared externa sigue llegando a z = 4 (la tolerancia actúa solo en la cara interna); antes del recorte la guía no puede insertarse. Tolerancia de comparación 0,1 mm (la manual del proyecto)."
+}

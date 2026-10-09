@@ -1,0 +1,7 @@
+{
+  "escaneo": "diente_017.stl",
+  "guia_sin_recortar": "guia_017_sin_recortar.stl",
+  "eje_insercion": [0, 0, 1],
+  "tolerancia_ajuste_mm": 0.2,
+  "descripcion": "Corte frontal x–z extruido de y = -5 a 5. Diente: cuello |x| ≤ 3 hasta z = 6 y corona |x| ≤ 4 de z = 6 a 10, sobre encía en z = 0. Guía antes del recorte: caja |x| ≤ 6, z de 4 a 12, menos el diente (rellena el hueco bajo la corona)."
+}

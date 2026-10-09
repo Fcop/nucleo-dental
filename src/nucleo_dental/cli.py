@@ -12,7 +12,13 @@ Códigos de salida de `medir`: 0 = verde, 2 = rojo, 1 = error de entrada.
                         --apice-hacia abajo [--radio 24] [--margen-encia 1] | --curva curva.mrk.json)
                         --salida apoyo.stl
 
+    nucleo-dental guia --escaneo escaneo.stl --dientes dientes.stl --implante-stl i.stl --apice-hacia abajo
+                       --curva limites.mrk.json --plano-oclusal plano.mrk.json [--fabricacion impresa]
+                       [--soporte dentosoportada] [--kit oneguide] --salida guia.stl
+
 Códigos de salida de `registrar` y `apoyo`: 0 = hecho, 1 = error de entrada.
+Códigos de salida de `guia`: 0 = guía válida (se escribe --salida), 2 = guía no
+válida (se escribe solo como <salida>_NO_VALIDA.stl para inspeccionarla), 1 = error de entrada.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+import numpy as np
 from vtk.util import numpy_support
 
 from nucleo_dental.implante import Implante
@@ -66,7 +73,7 @@ def main(argv=None) -> int:
         if args.comando is None:
             raise ErrorEntrada("falta el subcomando. Uso: nucleo-dental medir --caso ruta/caso.json "
                                "o nucleo-dental registrar --escaneo … --dientes …")
-        salida = {"registrar": _registrar, "apoyo": _apoyo}.get(args.comando, _medir)(args)
+        salida = {"registrar": _registrar, "apoyo": _apoyo, "guia": _guia}.get(args.comando, _medir)(args)
     except (ErrorEntrada, ValueError) as error:
         print(f"Error de entrada: {error}", file=sys.stderr)
         return CODIGO_ERROR_ENTRADA
@@ -74,6 +81,8 @@ def main(argv=None) -> int:
     print(json.dumps(salida, ensure_ascii=False, indent=2))
     if args.comando in ("registrar", "apoyo"):
         return CODIGO_VERDE
+    if args.comando == "guia":
+        return CODIGO_VERDE if salida["guia"]["valida"] else CODIGO_ROJO
     return CODIGO_VERDE if salida["resultado"]["semaforo"] == "verde" else CODIGO_ROJO
 
 
@@ -138,12 +147,80 @@ def _crear_parser() -> argparse.ArgumentParser:
     a.add_argument("--curva", help="Modo curva: curva cerrada dibujada en Slicer (.mrk.json, LPS o RAS declarado).")
     a.add_argument("--punto-interior", help="Modo curva: punto x,y,z (LPS) dentro de la región; por defecto el centro de la curva.")
     a.add_argument("--salida", help="Ruta donde guardar el parche de apoyo (STL).")
+
+    g = sub.add_parser("guia", help="Guía quirúrgica imprimible: apoyo dentro de la curva del usuario, puente, "
+                                    "anillo, recorte por el eje de inserción y tolerancia (R-021).")
+    g.add_argument("--escaneo", help="STL CERRADO del escaneo intraoral registrado con el CBCT, en LPS.")
+    g.add_argument("--dientes", help="STL de los dientes segmentados del CBCT (no hace falta si es mucosoportada).")
+    g.add_argument("--implante-stl", help="STL del implante planificado.")
+    g.add_argument("--apice-hacia", help="'abajo' (mandíbula) o 'arriba' (maxilar).")
+    g.add_argument("--curva", help="Límites de la guía: curva cerrada dibujada en Slicer (.mrk.json).")
+    g.add_argument("--punto-interior", help="Punto x,y,z (LPS) dentro de la curva; por defecto su centro.")
+    g.add_argument("--plano-oclusal", help="3 puntos del plano oclusal (.mrk.json): el eje de inserción es su normal.")
+    g.add_argument("--fabricacion", help="impresa (por defecto) o fresada: define ajuste del orificio y tolerancia.")
+    g.add_argument("--soporte", help="dentosoportada (por defecto), dentomucosoportada o mucosoportada.")
+    g.add_argument("--kit", help="Perfil del kit (por defecto oneguide).")
+    g.add_argument("--salida", help="Ruta del STL de la guía.")
     return parser
+
+
+def _guia(args) -> dict:
+    """Subcomando `guia` (R-021)."""
+    import vtk
+
+    from nucleo_dental.apoyo import leer_puntos_slicer, region_desde_curva
+    from nucleo_dental.ensamblaje import eje_desde_plano_oclusal, guia_quirurgica
+    from nucleo_dental.kits import obtener_kit
+
+    soporte = args.soporte or "dentosoportada"
+    requeridos = ["escaneo", "implante_stl", "apice_hacia", "curva", "plano_oclusal", "salida"]
+    if soporte != "mucosoportada":
+        requeridos.append("dientes")
+    faltan = [f"--{n.replace('_', '-')}" for n in requeridos if getattr(args, n) is None]
+    if faltan:
+        raise ErrorEntrada("faltan parámetros: " + ", ".join(faltan))
+    rutas = {n: Path(getattr(args, n)) for n in ("escaneo", "implante_stl", "curva", "plano_oclusal")}
+    ruta_dientes = Path(args.dientes) if args.dientes is not None else None
+    fabricacion = args.fabricacion or "impresa"
+    kit = obtener_kit(args.kit or "oneguide")
+
+    escaneo = leer_stl(rutas["escaneo"])
+    implante = Implante.desde_malla(leer_stl(rutas["implante_stl"]), args.apice_hacia)
+    plano = leer_puntos_slicer(rutas["plano_oclusal"])
+    eje = eje_desde_plano_oclusal(plano, implante.eje)
+    interior = _vector(args.punto_interior, "--punto-interior") if args.punto_interior is not None else None
+    mascara = region_desde_curva(escaneo, leer_puntos_slicer(rutas["curva"]), interior)
+    r = guia_quirurgica(escaneo, leer_stl(ruta_dientes) if ruta_dientes else None, implante, kit, fabricacion,
+                        mascara, eje, tipo_soporte=soporte)
+
+    ruta_salida = Path(args.salida)
+    if not r["valida"]:
+        ruta_salida = ruta_salida.with_name(ruta_salida.stem + "_NO_VALIDA" + ruta_salida.suffix)
+    escritor = vtk.vtkSTLWriter()
+    escritor.SetInputData(r["guia"])
+    escritor.SetFileName(str(ruta_salida))
+    escritor.SetFileTypeToBinary()
+    if not escritor.Write():
+        raise ErrorEntrada(f"no se pudo escribir {ruta_salida}")
+
+    pc = r["puente_y_columna"]
+    angulo = float(np.degrees(np.arccos(np.clip(abs(np.dot(eje, implante.eje)), -1.0, 1.0))))
+    archivos = [rutas["escaneo"], rutas["implante_stl"], rutas["curva"], rutas["plano_oclusal"]]
+    return {
+        "guia": {"valida": r["valida"], "problemas": r["problemas"],
+                 "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
+        "geometria": {"eje_insercion": r["eje_insercion"], "angulo_eje_implante_grados": angulo,
+                      "tolerancia_ajuste_mm": r["tolerancia_mm"], **pc},
+        "parametros": {**{n: str(v) for n, v in rutas.items()}, "dientes": str(ruta_dientes) if ruta_dientes else None,
+                       "apice_hacia": args.apice_hacia, "punto_interior": interior, "fabricacion": fabricacion,
+                       "tipo_soporte": soporte, "kit": kit.nombre, "provisionales": sorted(kit.provisionales),
+                       "sistema_coordenadas": "LPS", "unidades": "mm"},
+        "trazabilidad": _trazabilidad(archivos + ([ruta_dientes] if ruta_dientes else [])),
+    }
 
 
 def _apoyo(args) -> dict:
     """Subcomando `apoyo` (R-016)."""
-    import numpy as np
     import vtk
 
     from nucleo_dental.apoyo import (RADIO_APOYO_POR_DEFECTO_MM, leer_puntos_slicer, parche_de_apoyo,

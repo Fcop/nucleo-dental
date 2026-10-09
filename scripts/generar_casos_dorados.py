@@ -28,6 +28,11 @@ x = -20 a x = 20 mm, centrados en y = 0, z = 0.
   6 mm por lado del eje x = 0 (bordes en x = 5/11, 13/19, 21/27), de z = 0 a 8,
   sobre una encía plana en z = 0; en el CBCT siguen como raíz hasta z = -10
   (región de apoyo, R-016).
+- diente_017.stl y guia_017_sin_recortar.stl: corte frontal (x–z) extruido de
+  y = -5 a 5. Diente sobre una base de encía (x de -10 a 10, z de -2 a 0):
+  cuello de x = -3 a 3 hasta z = 6 y corona de x = -4 a 4 entre z = 6 y 10.
+  Guía antes del recorte: caja de x = -6 a 6 y z = 4 a 12 menos el diente;
+  rellena el hueco bajo la corona (|x| de 3 a 4, z de 4 a 6) (ensamblaje, R-021).
 
 Este script NO escribe ningún esperado.json: los resultados esperados los
 calcula y escribe una persona.
@@ -243,6 +248,47 @@ def _malla(puntos: np.ndarray, triangulos: np.ndarray) -> vtk.vtkPolyData:
     return pd
 
 
+def construir_perfil_extruido(perfil_xz, y_min: float, y_max: float) -> vtk.vtkPolyData:
+    """Sólido cerrado: polígono simple del plano x–z extruido a lo largo de y."""
+    perfil = np.asarray(perfil_xz, dtype=float)
+    n = len(perfil)
+    poligono = vtk.vtkPolyData()
+    puntos = vtk.vtkPoints()
+    puntos.SetData(numpy_support.numpy_to_vtk(np.column_stack([perfil[:, 0], np.zeros(n), perfil[:, 1]]), deep=True))
+    poligono.SetPoints(puntos)
+    celda = vtk.vtkCellArray()
+    celda.InsertNextCell(n, list(range(n)))
+    poligono.SetPolys(celda)
+    tri = vtk.vtkTriangleFilter()                 # triangula la tapa (polígono cóncavo)
+    tri.SetInputData(poligono)
+    tri.Update()
+    tapa = numpy_support.vtk_to_numpy(tri.GetOutput().GetPolys().GetConnectivityArray()).reshape(-1, 3)
+
+    vertices = np.vstack([np.column_stack([perfil[:, 0], np.full(n, y_min), perfil[:, 1]]),
+                          np.column_stack([perfil[:, 0], np.full(n, y_max), perfil[:, 1]])])
+    # Tapas con el mismo sentido de giro que el polígono; así son coherentes con los lados.
+    plano = vertices[:n]
+    giro = np.cross(plano, np.roll(plano, -1, axis=0))[:, 1].sum()      # componente y de la normal del polígono
+    normal_tapa = np.cross(plano[tapa[:, 1]] - plano[tapa[:, 0]], plano[tapa[:, 2]] - plano[tapa[:, 0]])[:, 1]
+    tapa = np.where((normal_tapa * giro < 0)[:, None], tapa[:, ::-1], tapa)
+    i = np.arange(n)
+    j = (i + 1) % n
+    lados = np.vstack([np.column_stack([i, j, j + n]), np.column_stack([i, j + n, i + n])])
+    triangulos = np.vstack([tapa[:, ::-1], tapa + n, lados])
+    pd = _malla(vertices, triangulos)
+    v = numpy_support.vtk_to_numpy(pd.GetPoints().GetData())
+    t = triangulos
+    if np.einsum("ij,ij->i", v[t[:, 0]], np.cross(v[t[:, 1]], v[t[:, 2]])).sum() < 0:
+        pd = _malla(vertices, triangulos[:, ::-1])
+    return pd
+
+
+DIENTE_017 = [(-10, -2), (10, -2), (10, 0), (3, 0), (3, 6), (4, 6), (4, 10),
+              (-4, 10), (-4, 6), (-3, 6), (-3, 0), (-10, 0)]
+GUIA_017 = [(-6, 4), (-3, 4), (-3, 6), (-4, 6), (-4, 10), (4, 10), (4, 6),
+            (3, 6), (3, 4), (6, 4), (6, 12), (-6, 12)]
+
+
 def verificar(pd: vtk.vtkPolyData, volumen_ideal: float, vertices_exactos=()) -> None:
     """Comprueba que la malla es cerrada, con normales hacia afuera y los vértices pedidos."""
     bordes = vtk.vtkFeatureEdges()
@@ -337,6 +383,14 @@ def main() -> None:
         verificar(hueso, np.pi * radio ** 2 * 20.0,
                   vertices_exactos=([0.0, 0.5 - radio, 0.0], [0.0, 0.5 + radio, 0.0]))
         escribir(hueso, nombre)
+
+    print("guia/caso_017_undercut/diente_017.stl y guia_017_sin_recortar.stl")
+    diente_017 = construir_perfil_extruido(DIENTE_017, -5.0, 5.0)
+    verificar(diente_017, (20 * 2 + 6 * 6 + 8 * 4) * 10.0)
+    escribir(diente_017, "guia/caso_017_undercut/diente_017.stl")
+    guia_017 = construir_perfil_extruido(GUIA_017, -5.0, 5.0)
+    verificar(guia_017, (12 * 8 - 6 * 2 - 8 * 4) * 10.0)
+    escribir(guia_017, "guia/caso_017_undercut/guia_017_sin_recortar.stl")
 
 
 if __name__ == "__main__":

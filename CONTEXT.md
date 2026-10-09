@@ -100,6 +100,18 @@ _Evitar_: camisa (es la pieza metálica opcional), tubo, manga
 Largo de resina que roza la fresa dentro del orificio; es el del kit con alivio, o del piso del puente a la cara superior sin alivio.
 _Evitar_: largo del anillo, altura de guía
 
+**Eje de inserción**:
+Dirección en que la guía se coloca y se retira; en esta etapa, la normal al plano oclusal definido por 3 puntos.
+_Evitar_: eje (a secas, es el del implante), dirección de colocación
+
+**Undercut**:
+Zona del diente o la encía bajo una parte más ancha (p. ej. bajo la corona) donde la guía quedaría trabada al retirarla por el eje de inserción; se recorta de la guía.
+_Evitar_: retención, socavado (en el código y la documentación nueva)
+
+**Tolerancia de ajuste**:
+Separación entre la cara interna de la guía y el escaneo, según el método de fabricación.
+_Evitar_: holgura (es la del puente sobre la encía), juego, offset
+
 **Puente**:
 Parte de la guía que cruza sobre la brecha y une el anillo con el apoyo; con holgura sobre la encía solo si la guía es dentosoportada.
 _Evitar_: póntico, barra

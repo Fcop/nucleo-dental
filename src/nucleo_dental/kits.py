@@ -27,6 +27,7 @@ class PerfilKit:
     pared_camisa_mm: float = 1.0
     alivio_mm: float = 0.0                 # ensanche del orificio bajo el anillo (0 = sin alivio)
     profundidad_puente_mm: float = 6.0     # hasta dónde baja el puente bajo la cresta, a lo largo del eje
+    tolerancia_ajuste_mm: dict = field(default_factory=dict)    # juego guía–diente según método
     provisionales: frozenset = frozenset()
     fuente: str = ""
 
@@ -41,6 +42,12 @@ class PerfilKit:
             raise ValueError(f"Método de fabricación desconocido '{fabricacion}'; opciones: "
                              + ", ".join(self.ajuste_fabricacion_mm))
         return self.ajuste_fabricacion_mm[fabricacion]
+
+    def tolerancia_ajuste(self, fabricacion: str) -> float:
+        if fabricacion not in self.tolerancia_ajuste_mm:
+            raise ValueError(f"Método de fabricación desconocido '{fabricacion}'; opciones: "
+                             + ", ".join(self.tolerancia_ajuste_mm))
+        return self.tolerancia_ajuste_mm[fabricacion]
 
     def con(self, **cambios) -> "PerfilKit":
         return replace(self, **cambios)
@@ -59,9 +66,11 @@ ONEGUIDE = PerfilKit(
     con_camisa=False,
     alivio_mm=0.0,
     profundidad_puente_mm=6.0,
-    provisionales=frozenset({"sobrefresado_mm"}),
+    tolerancia_ajuste_mm={"impresa": 0.2, "fresada": 0.1},
+    provisionales=frozenset({"sobrefresado_mm", "tolerancia_ajuste_mm"}),
     fuente=("Catálogo y manual Hiossen OneGuide (orificios Ø5,0/Ø5,7, contacto 3 mm, sin camisa); "
-            "offset, espesor, pared, holgura, ajustes y sobrefresado: decisiones clínicas 2026-10-08"),
+            "offset, espesor, pared, holgura, ajustes y sobrefresado: decisiones clínicas 2026-10-08; "
+            "tolerancia de ajuste dentro del rango aceptado el 2026-10-09 (impresa 0,20–0,30; fresada 0,10–0,15)"),
 )
 
 _KITS = {ONEGUIDE.nombre: ONEGUIDE}
