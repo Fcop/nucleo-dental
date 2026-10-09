@@ -136,3 +136,37 @@ def test_pared_delgada_es_aviso_y_solape_no_es_valido():
         assert r["valida"] is valida
         if not valida:
             assert any("se solapan" in p for p in r["problemas"])
+
+
+def _caso_medir(tmp_path, x_b):
+    """caso.json con los implantes del caso 018 bajados 3 mm, bajo el canal recto (pared inferior en z = −1,5)."""
+    caso = {"canal": str(CASOS_DORADOS / "canal_recto.stl"), "margen": 2.0,
+            "implantes": {"A": {"diametro": 4.1, "largo": 10.0, "apice": [0, 0, -15.0], "eje": [0, 0, 1]},
+                          "B": {"diametro": 4.1, "largo": 10.0, "apice": [x_b, 0, -16.0], "eje": [0, 0, 1]}}}
+    ruta = tmp_path / f"caso_{x_b}.json"
+    ruta.write_text(json.dumps(caso), encoding="utf-8")
+    return ruta
+
+
+@pytest.mark.parametrize("x_b, codigo, entre", [(8.0, 0, "verde"), (7.0, 2, "rojo")])
+def test_medir_con_varios_implantes(tmp_path, capsys, x_b, codigo, entre):
+    """Verifica R-023: `medir --caso` con "implantes" evalúa cada implante contra el canal y cada par entre sí; rojo si algo es rojo."""
+    from nucleo_dental.cli import main
+
+    assert main(["medir", "--caso", str(_caso_medir(tmp_path, x_b))]) == codigo
+    resultado = json.loads(capsys.readouterr().out)["resultado"]
+    assert {n: r["semaforo"] for n, r in resultado["implantes"].items()} == {"A": "verde", "B": "verde"}
+    assert resultado["entre_implantes"]["semaforo"] == entre
+    assert resultado["semaforo"] == entre
+
+
+def test_caso_con_implante_e_implantes_es_error(tmp_path, capsys):
+    """Verifica R-023: un caso.json no puede traer a la vez "implante" e "implantes"."""
+    from nucleo_dental.cli import main
+
+    caso = json.loads(_caso_medir(tmp_path, 8.0).read_text(encoding="utf-8"))
+    caso["implante"] = caso["implantes"]["A"]
+    ruta = tmp_path / "ambos.json"
+    ruta.write_text(json.dumps(caso), encoding="utf-8")
+    assert main(["medir", "--caso", str(ruta)]) == 1
+    assert "implantes" in capsys.readouterr().err

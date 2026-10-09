@@ -1,6 +1,6 @@
 """Comando de terminal `nucleo-dental` (R-007, R-008).
 
-    nucleo-dental medir --caso ruta/caso.json
+    nucleo-dental medir --caso ruta/caso.json   (con "implante" o "implantes": {nombre: implante})
     nucleo-dental medir --canal canal.stl --diametro 4.1 --largo 10 \\
                         --apice x,y,z --eje dx,dy,dz [--margen 2.0]
     nucleo-dental registrar --escaneo escaneo.stl --dientes dientes.stl \\
@@ -39,7 +39,8 @@ from vtk.util import numpy_support
 
 from nucleo_dental.implante import Implante
 from nucleo_dental.medicion import (MARGEN_DIENTES_POR_DEFECTO_MM, MARGEN_HUESO_POR_DEFECTO_MM,
-                                    MARGEN_POR_DEFECTO_MM, evaluar_plan, leer_stl)
+                                    MARGEN_IMPLANTES_POR_DEFECTO_MM, MARGEN_POR_DEFECTO_MM, evaluar_implantes,
+                                    evaluar_plan, leer_stl)
 
 CODIGO_VERDE = 0
 CODIGO_ERROR_ENTRADA = 1
@@ -174,7 +175,6 @@ def _guia(args) -> dict:
     from nucleo_dental.apoyo import leer_puntos_slicer, region_desde_curva
     from nucleo_dental.ensamblaje import eje_desde_plano_oclusal, guia_quirurgica
     from nucleo_dental.kits import obtener_kit
-    from nucleo_dental.medicion import evaluar_implantes
 
     soporte = args.soporte or "dentosoportada"
     requeridos = ["escaneo", "implante_stl", "apice_hacia", "curva", "plano_oclusal", "salida"]
@@ -354,9 +354,13 @@ def _medir(args) -> dict:
         ruta_caso = Path(args.caso)
         caso = _leer_caso(ruta_caso)
         ruta_canal = (ruta_caso.parent / caso["canal"])
-        especificacion = dict(caso["implante"])
-        if "stl" in especificacion:
-            especificacion["stl"] = str(ruta_caso.parent / especificacion["stl"])
+        especificaciones = {}
+        for nombre, datos in (caso["implantes"] if "implantes" in caso else {"implante": caso["implante"]}).items():
+            especificaciones[nombre] = dict(datos)
+            if "stl" in datos:
+                especificaciones[nombre]["stl"] = str(ruta_caso.parent / datos["stl"])
+        varios = "implantes" in caso
+        margen_implantes = caso.get("margen_implantes", MARGEN_IMPLANTES_POR_DEFECTO_MM)
         margen = caso["margen"]
         sobrefresado = caso.get("sobrefresado_mm", 0.0)
         opcionales = {n: (ruta_caso.parent / caso[n], caso.get(f"margen_{n}", defecto))
@@ -366,7 +370,9 @@ def _medir(args) -> dict:
         if not sueltos:
             raise ErrorEntrada("indica --caso ruta/caso.json o los parámetros sueltos (--canal y el implante: "
                                "--diametro --largo --apice --eje, o --implante-stl --apice-hacia)")
-        especificacion = _implante_desde_argumentos(args)
+        especificaciones = {"implante": _implante_desde_argumentos(args)}
+        varios = False
+        margen_implantes = MARGEN_IMPLANTES_POR_DEFECTO_MM
         if args.canal is None:
             raise ErrorEntrada("faltan parámetros: --canal")
         ruta_canal = Path(args.canal)
@@ -375,9 +381,11 @@ def _medir(args) -> dict:
         opcionales = _opcionales_desde_argumentos(args)
         archivos = [ruta_canal]
 
-    implante, implante_dict = _construir_implante(especificacion)
-    if "stl" in implante_dict:
-        archivos.append(Path(implante_dict["stl"]))
+    implantes, descripciones = {}, {}
+    for nombre, especificacion in especificaciones.items():
+        implantes[nombre], descripciones[nombre] = _construir_implante(especificacion)
+        if "stl" in descripciones[nombre]:
+            archivos.append(Path(descripciones[nombre]["stl"]))
     estructuras = {"canal": (leer_stl(ruta_canal), margen)}
     for nombre, (ruta, margen_opcional) in opcionales.items():
         estructuras[nombre] = (leer_stl(ruta), margen_opcional)
@@ -390,17 +398,29 @@ def _medir(args) -> dict:
         volumen = leer_cbct(args.cbct)
         vertices = {nombre: numpy_support.vtk_to_numpy(malla.GetPoints().GetData())
                     for nombre, (malla, _) in estructuras.items()}
-        exigir_dentro_del_volumen(volumen, vertices, implante)
+        for implante in implantes.values():
+            exigir_dentro_del_volumen(volumen, vertices, implante)
         cbct = volumen.descripcion()
 
-    parametros = {"canal": str(ruta_canal), "implante": implante_dict, "margen": margen,
-                  "sobrefresado_mm": sobrefresado}
+    parametros = {"canal": str(ruta_canal), "margen": margen, "sobrefresado_mm": sobrefresado}
+    if varios:
+        parametros.update({"implantes": descripciones, "margen_implantes": margen_implantes})
+    else:
+        parametros["implante"] = descripciones["implante"]
     for nombre, (ruta, margen_opcional) in opcionales.items():
         parametros.update({nombre: str(ruta), f"margen_{nombre}": margen_opcional})
     parametros.update({"sistema_coordenadas": "LPS", "unidades": "mm"})
 
+    if varios:
+        # R-023: cada implante contra las estructuras y cada par entre sí; rojo si algo es rojo.
+        por_implante = {n: evaluar_plan(i, estructuras, sobrefresado_mm=sobrefresado) for n, i in implantes.items()}
+        entre = evaluar_implantes(implantes, margen_implantes) if len(implantes) > 1 else None
+        rojo = any(r["semaforo"] == "rojo" for r in por_implante.values()) or (entre and entre["semaforo"] == "rojo")
+        resultado = {"semaforo": "rojo" if rojo else "verde", "implantes": por_implante, "entre_implantes": entre}
+    else:
+        resultado = evaluar_plan(implantes["implante"], estructuras, sobrefresado_mm=sobrefresado)
     salida = {
-        "resultado": evaluar_plan(implante, estructuras, sobrefresado_mm=sobrefresado),
+        "resultado": resultado,
         "parametros": parametros,
         "trazabilidad": _trazabilidad(archivos),
     }
@@ -481,13 +501,19 @@ def _leer_caso(ruta: Path) -> dict:
         caso = json.loads(ruta.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ErrorEntrada(f"{ruta} no es un JSON válido: {error}") from None
-    faltan = [c for c in ("canal", "implante", "margen") if c not in caso]
+    faltan = [c for c in ("canal", "margen") if c not in caso]
+    if ("implante" in caso) == ("implantes" in caso):
+        faltan.append("implante (uno) o implantes ({nombre: implante}, varios)")
     if faltan:
         raise ErrorEntrada(f"{ruta} no tiene los campos: {', '.join(faltan)}")
-    requeridos = ("stl", "apice_hacia") if "stl" in caso["implante"] else ("diametro", "largo", "apice", "eje")
-    faltan = [c for c in requeridos if c not in caso["implante"]]
-    if faltan:
-        raise ErrorEntrada(f"{ruta}: al implante le faltan los campos: {', '.join(faltan)}")
+    implantes = caso["implantes"] if "implantes" in caso else {"implante": caso["implante"]}
+    if not isinstance(implantes, dict) or not implantes:
+        raise ErrorEntrada(f"{ruta}: 'implantes' debe ser un objeto {{nombre: implante}} con al menos uno")
+    for nombre, implante in implantes.items():
+        requeridos = ("stl", "apice_hacia") if "stl" in implante else ("diametro", "largo", "apice", "eje")
+        faltan = [c for c in requeridos if c not in implante]
+        if faltan:
+            raise ErrorEntrada(f"{ruta}: al implante '{nombre}' le faltan los campos: {', '.join(faltan)}")
     return caso
 
 
