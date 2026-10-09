@@ -58,7 +58,7 @@ def analizar_ajuste(guia: vtk.vtkPolyData, escaneo: vtk.vtkPolyData, tolerancia_
         ensamblaje.holgura_sobre_encia); el objetivo de cada punto de la guía
         es máx(tolerancia, holgura del vértice del escaneo más cercano).
     desvio_aceptable_mm : banda alrededor del objetivo que cuenta como
-        "ideal" (PROVISIONAL, a confirmar por Francisco).
+        "ideal" (confirmado por Francisco el 2026-10-09).
     """
     nf = vtk.vtkPolyDataNormals()
     nf.SetInputData(guia)
