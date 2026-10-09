@@ -1,0 +1,11 @@
+{
+  "plataforma_z": 14.0,
+  "cara_superior_z": 24.5,
+  "cara_inferior_anillo_z": 21.5,
+  "diametro_orificio_mm": 5.3,
+  "diametro_externo_anillo_mm": 11.3,
+  "punta_fresa_z": 3.7,
+  "largo_trabajo_fresa_mm": 20.8,
+  "tolerancia_mm": 0.01,
+  "origen": "Francisco, 2026-10-08: plataforma 14 y fresa de 20,8 mm calculadas por él; cara superior 24,5 e inferior 21,5 corregidas por un desliz de suma (él respondió 20,5 y 17,5), coherentes con su largo de fresa; orificio = Ø5,0 del kit + 0,3 de ajuste por impresión (sus reglas); anillo con pared de 3 mm (su decisión)."
+}

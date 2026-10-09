@@ -28,7 +28,8 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ Región de apoyo (R-016): modo automático (R = 24 mm, 1 mm de la encía) y modo curva por puntos; comando `nucleo-dental apoyo`
 - ✅ Sobrefresado configurable en la medición al canal (R-017; OneGuide 0,3 mm provisional)
 - ☐ Pincel y edición interactiva de la región (etapa 5, en la app)
-- ▶ Orificio guía según el kit OneGuide: Ø5,0 mm (F3.5–F4.5) / Ø5,7 mm (F5.0), 3 mm de contacto, offset 10,5 mm, plantilla de 3 mm; perfil de kit configurable
+- ✅ Perfil de kit configurable y anillo guía con orificio (R-018): OneGuide; caso dorado 015
+- ▶ Puente sobre la brecha que une el anillo con el apoyo, 1 mm sobre la encía
 - ☐ Eje de inserción, eliminación de undercuts y tolerancia de ajuste
 - ☐ Validación geométrica y exportación de STL imprimible
 
