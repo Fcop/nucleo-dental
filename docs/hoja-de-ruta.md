@@ -42,7 +42,8 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ☐ Probar varios implantes en un caso real anonimizado (Francisco lo está preparando)
 - ✅ Ventanas de inspección (R-024): cajas ROI de Slicer que el usuario mueve y redimensiona, restadas de la guía
 - ☐ En la app (etapa 5): crear la caja con tamaño inicial de 3 × 3 mm de cara y largo que atraviese la guía (decisión 2026-10-09), moverla y redimensionarla
-- ☐ Pines de fijación al hueso, con su dirección y su camisa (clave en dentomuco y mucosoportada)
+- ✅ Pines de fijación (R-025): STL ubicado en Slicer, profundidad en el hueso, semáforo (2 mm), agujero y refuerzo en la guía
+- ☐ Caso dorado 019 de pines (cálculo de Francisco) y alto del refuerzo confirmado
 - ☐ Texto grabado en la guía: caso, kit y posición del implante (trazabilidad)
 - ☐ Informe del protocolo quirúrgico (PDF): kit, orificio, largo de trabajo de la fresa, offset
   (Ideas de funciones tomadas de B4D Guide3, software propietario: solo la idea, implementación propia)

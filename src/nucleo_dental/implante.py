@@ -34,6 +34,39 @@ def _vector3(valor, nombre: str) -> np.ndarray:
     return v
 
 
+def cilindro_desde_malla(malla, que: str = "implante"):
+    """(centro, eje unitario, t_min, t_max, radio) del cilindro que forma la malla, por componentes principales.
+
+    Las coordenadas axiales t_min y t_max ubican los dos extremos sobre el eje
+    a partir del centro. Se rechaza una malla que no sea un cilindro.
+    """
+    from vtk.util import numpy_support
+
+    p = numpy_support.vtk_to_numpy(malla.GetPoints().GetData()).astype(float)
+    if len(p) < 6:
+        raise ValueError(f"La malla del {que} tiene muy pocos vértices para ser un cilindro.")
+    centro = p.mean(axis=0)
+    eje = np.linalg.svd(p - centro, full_matrices=False)[2][0]
+    t = (p - centro) @ eje
+    r = np.linalg.norm((p - centro) - np.outer(t, eje), axis=1)
+    t_min, t_max = t.min(), t.max()
+
+    en_min = np.abs(t - t_min) <= _TOLERANCIA_FORMA_MM
+    en_max = np.abs(t - t_max) <= _TOLERANCIA_FORMA_MM
+    lado = ~(en_min | en_max)
+    radio = r[lado].mean() if lado.any() else r[r >= r.max() - _TOLERANCIA_FORMA_MM].mean()
+    es_cilindro = (
+        np.all(np.abs(r[lado] - radio) <= _TOLERANCIA_FORMA_MM)
+        and r.max() <= radio + _TOLERANCIA_FORMA_MM
+        and r[en_min].max() >= radio - _TOLERANCIA_FORMA_MM
+        and r[en_max].max() >= radio - _TOLERANCIA_FORMA_MM
+    )
+    if not es_cilindro:
+        raise ValueError(f"La malla del {que} no es un cilindro (radio no constante o extremos sin borde "
+                         "circular). Por ahora el núcleo solo modela cilindros (R-003).")
+    return centro, eje, t_min, t_max, radio
+
+
 class Implante:
     def __init__(self, diametro: float, largo: float, apice, eje):
         self.diametro = _positivo(diametro, "diámetro")
@@ -55,33 +88,9 @@ class Implante:
         mandíbula) o "arriba" (ápice superior, maxilar). Se rechaza un
         implante a más de 60° de la vertical y una malla que no sea un cilindro.
         """
-        from vtk.util import numpy_support
-
         if apice_hacia not in ("abajo", "arriba"):
             raise ValueError(f"apice_hacia debe ser 'abajo' o 'arriba' (se recibió '{apice_hacia}').")
-        p = numpy_support.vtk_to_numpy(malla.GetPoints().GetData()).astype(float)
-        if len(p) < 6:
-            raise ValueError("La malla del implante tiene muy pocos vértices para ser un cilindro.")
-
-        centro = p.mean(axis=0)
-        eje = np.linalg.svd(p - centro, full_matrices=False)[2][0]
-        t = (p - centro) @ eje
-        r = np.linalg.norm((p - centro) - np.outer(t, eje), axis=1)
-        t_min, t_max = t.min(), t.max()
-
-        en_min = np.abs(t - t_min) <= _TOLERANCIA_FORMA_MM
-        en_max = np.abs(t - t_max) <= _TOLERANCIA_FORMA_MM
-        lado = ~(en_min | en_max)
-        radio = r[lado].mean() if lado.any() else r[r >= r.max() - _TOLERANCIA_FORMA_MM].mean()
-        es_cilindro = (
-            np.all(np.abs(r[lado] - radio) <= _TOLERANCIA_FORMA_MM)
-            and r.max() <= radio + _TOLERANCIA_FORMA_MM
-            and r[en_min].max() >= radio - _TOLERANCIA_FORMA_MM
-            and r[en_max].max() >= radio - _TOLERANCIA_FORMA_MM
-        )
-        if not es_cilindro:
-            raise ValueError("La malla del implante no es un cilindro (radio no constante o extremos sin borde "
-                             "circular). Por ahora el núcleo solo modela implantes cilíndricos (R-003).")
+        centro, eje, t_min, t_max, radio = cilindro_desde_malla(malla, "implante")
 
         if abs(eje[2]) < np.cos(np.radians(60)):
             angulo = np.degrees(np.arccos(abs(eje[2])))

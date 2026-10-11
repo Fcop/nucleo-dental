@@ -232,7 +232,7 @@ def _separacion_por_nodo(escaneo, holgura_por_vertice, d_escaneo, origen, espaci
 
 def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: str, mascara_apoyo,
                     eje_insercion, tipo_soporte: str = "dentosoportada", con_puente: bool = False,
-                    espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM, ventanas=()) -> dict:
+                    espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM, ventanas=(), pines=()) -> dict:
     """Guía completa: carcasa dentro de los límites + un anillo con su orificio por implante (R-021, R-023).
 
     `implantes` es un Implante o una lista: todos comparten el kit y el método
@@ -243,9 +243,11 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
     puente automático (R-019), pensado para una región automática que solo
     cubre dientes y un solo implante. `ventanas` son cajas ({"centro", "ejes",
     "tamano"}, p. ej. de apoyo.leer_cajas_slicer) que se restan de la guía:
-    ventanas de inspección que el usuario ubica y dimensiona (R-024).
+    ventanas de inspección que el usuario ubica y dimensiona (R-024). `pines`
+    (pines.Pin) suman su refuerzo y restan su agujero (R-025).
     """
     from nucleo_dental.guia import TIPOS_SOPORTE, anillo_y_orificio, caja_como_malla, columna_del_anillo, puente_y_columna
+    from nucleo_dental.pines import refuerzo_y_agujero
 
     if tipo_soporte not in TIPOS_SOPORTE:
         raise ValueError(f"Tipo de soporte desconocido '{tipo_soporte}'; opciones: " + ", ".join(TIPOS_SOPORTE))
@@ -269,6 +271,9 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
             negativos.append(pc["alivio"])
     cajas = [caja_como_malla(v["centro"], v["ejes"], v["tamano"]) for v in ventanas]
     negativos += cajas
+    refuerzos = [refuerzo_y_agujero(pin, escaneo, kit, fabricacion) for pin in pines]
+    extras += [r["refuerzo"] for r in refuerzos]
+    negativos += [r["agujero"] for r in refuerzos]
     por_vertice = None
     if holgura > 0:
         if dientes is None:
@@ -278,7 +283,11 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
     resultado = ensamblar(positivos, escaneo, eje_insercion, kit.tolerancia_ajuste(fabricacion),
                           negativos=negativos, espaciado_mm=espaciado_mm, holgura_por_vertice=por_vertice)
     resultado["avisos"] = []
-    resultado["paredes_entre_orificios"] = _revisar_paredes(implantes, anillos, resultado)
+    tramos = [(f"orificio {i}", _tramo_del_orificio(imp, pc)) for i, (imp, pc) in enumerate(zip(implantes, anillos), 1)]
+    tramos += [(f"pin {i}", r["tramo_agujero"]) for i, r in enumerate(refuerzos, 1)]
+    resultado["paredes_entre_orificios"] = _revisar_paredes(tramos, resultado)
+    resultado["pines"] = [{k: v for k, v in r.items() if k not in ("refuerzo", "agujero", "tramo_agujero")}
+                          for r in refuerzos]
     resultado["ventanas"] = _revisar_ventanas(ventanas, resultado, espaciado_mm)
     resultado.update({"anillos": [{k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")}
                                   for pc in anillos],
@@ -310,31 +319,35 @@ def _revisar_ventanas(ventanas, resultado: dict, espaciado: float) -> list:
     return informe
 
 
-def _revisar_paredes(implantes, anillos, resultado: dict) -> list:
-    """Pared de resina entre cada par de orificios, dentro de la guía (del piso a la cara superior).
+def _revisar_paredes(tramos: list, resultado: dict) -> list:
+    """Pared de resina entre cada par de agujeros dentro de la guía (orificios de implante y agujeros de pin).
 
-    Bajo PARED_MINIMA_ORIFICIOS_MM es un aviso; si los orificios se solapan la
-    guía no es válida (decisión clínica 2026-10-09).
+    `tramos` es [(etiqueta, cilindro del agujero dentro de la guía)]. Bajo
+    PARED_MINIMA_ORIFICIOS_MM es un aviso; si se solapan la guía no es válida
+    (decisión clínica 2026-10-09).
     """
     from nucleo_dental.medicion import distancia_entre_implantes
 
-    tramos = []
-    for implante, pc in zip(implantes, anillos):
-        piso = np.asarray(pc["piso_en_eje"], dtype=float)
-        largo = float((np.asarray(pc["geometria"]["cara_superior"]) - piso) @ implante.eje)
-        tramos.append(Implante(pc["geometria"]["diametro_orificio_mm"], largo, piso, implante.eje))
     paredes = []
-    for i in range(len(tramos)):                     # pares de orificios
+    for i in range(len(tramos)):                     # pares de agujeros: unos pocos
         for j in range(i + 1, len(tramos)):
-            d = distancia_entre_implantes(tramos[i], tramos[j])
-            paredes.append({"orificios": [i + 1, j + 1], "pared_mm": d["distancia_mm"], "solapados": d["colision"]})
+            (a, ca), (b, cb) = tramos[i], tramos[j]
+            d = distancia_entre_implantes(ca, cb)
+            paredes.append({"entre": [a, b], "pared_mm": d["distancia_mm"], "solapados": d["colision"]})
             if d["colision"]:
                 resultado["valida"] = False
-                resultado["problemas"].append(f"Los orificios {i + 1} y {j + 1} se solapan: la fresa no tendría guía.")
+                resultado["problemas"].append(f"El {a} y el {b} se solapan: la fresa o el pin no tendrían guía.")
             elif d["distancia_mm"] < PARED_MINIMA_ORIFICIOS_MM:
-                resultado["avisos"].append(f"Entre los orificios {i + 1} y {j + 1} quedan {d['distancia_mm']:.2f} mm "
+                resultado["avisos"].append(f"Entre el {a} y el {b} quedan {d['distancia_mm']:.2f} mm "
                                            f"de resina (mínimo {PARED_MINIMA_ORIFICIOS_MM} mm).")
     return paredes
+
+
+def _tramo_del_orificio(implante: Implante, pc: dict) -> Implante:
+    """Cilindro del orificio dentro de la guía: del piso a la cara superior del anillo."""
+    piso = np.asarray(pc["piso_en_eje"], dtype=float)
+    largo = float((np.asarray(pc["geometria"]["cara_superior"]) - piso) @ implante.eje)
+    return Implante(pc["geometria"]["diametro_orificio_mm"], largo, piso, implante.eje)
 
 
 def _agregar_ajuste(resultado: dict, escaneo, tolerancia_mm: float, holgura_por_vertice) -> None:

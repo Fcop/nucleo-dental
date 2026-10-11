@@ -39,6 +39,7 @@ import numpy as np
 from vtk.util import numpy_support
 
 from nucleo_dental.implante import Implante
+from nucleo_dental.pines import MARGEN_PIN_POR_DEFECTO_MM, Pin, evaluar_pin, profundidad_en_hueso
 from nucleo_dental.medicion import (MARGEN_DIENTES_POR_DEFECTO_MM, MARGEN_HUESO_POR_DEFECTO_MM,
                                     MARGEN_IMPLANTES_POR_DEFECTO_MM, MARGEN_POR_DEFECTO_MM, evaluar_implantes,
                                     evaluar_plan, leer_stl)
@@ -165,6 +166,10 @@ def _crear_parser() -> argparse.ArgumentParser:
     g.add_argument("--ventanas", action="append", help="Ventanas de inspección: cajas (ROI) de Slicer (.mrk.json) "
                                                         "ubicadas y dimensionadas por el usuario; se restan de la guía. "
                                                         "Repetir por cada archivo.")
+    g.add_argument("--pin-stl", action="append", help="Pin de fijación: STL de un cilindro ubicado en Slicer; repetir "
+                                                       "por cada pin. Requiere --hueso (la punta es el extremo en el hueso).")
+    g.add_argument("--hueso", help="STL cerrado del hueso (p. ej. Mandible.stl): con --pin-stl, define la punta del pin "
+                                   "y cuánto entra en el hueso.")
     g.add_argument("--fabricacion", help="impresa (por defecto) o fresada: define ajuste del orificio y tolerancia.")
     g.add_argument("--soporte", help="dentosoportada (por defecto), dentomucosoportada o mucosoportada.")
     g.add_argument("--kit", help="Perfil del kit (por defecto oneguide).")
@@ -173,7 +178,7 @@ def _crear_parser() -> argparse.ArgumentParser:
 
 
 def _guia(args) -> dict:
-    """Subcomando `guia` (R-021, R-022, R-023)."""
+    """Subcomando `guia` (R-021 a R-025)."""
     import vtk
 
     from nucleo_dental.apoyo import leer_cajas_slicer, leer_puntos_slicer, region_desde_curva
@@ -192,6 +197,10 @@ def _guia(args) -> dict:
     rutas_ventanas = [Path(r) for r in (args.ventanas or [])]
     ventanas = [caja for ruta in rutas_ventanas for caja in leer_cajas_slicer(ruta)]
     ruta_dientes = Path(args.dientes) if args.dientes is not None else None
+    rutas_pines = [Path(r) for r in (args.pin_stl or [])]
+    if rutas_pines and args.hueso is None:
+        raise ErrorEntrada("--pin-stl necesita --hueso: la punta del pin es el extremo que queda dentro del hueso")
+    ruta_hueso = Path(args.hueso) if args.hueso is not None else None
     fabricacion = args.fabricacion or "impresa"
     kit = obtener_kit(args.kit or "oneguide")
 
@@ -201,8 +210,11 @@ def _guia(args) -> dict:
     eje = eje_desde_plano_oclusal(plano, np.mean([i.eje for i in implantes], axis=0))
     interior = _vector(args.punto_interior, "--punto-interior") if args.punto_interior is not None else None
     mascara = region_desde_curva(escaneo, leer_puntos_slicer(rutas["curva"]), interior)
-    r = guia_quirurgica(escaneo, leer_stl(ruta_dientes) if ruta_dientes else None, implantes, kit, fabricacion,
-                        mascara, eje, tipo_soporte=soporte, ventanas=ventanas)
+    hueso = leer_stl(ruta_hueso) if ruta_hueso else None
+    pines = [Pin.desde_malla(leer_stl(r), hueso) for r in rutas_pines]
+    dientes = leer_stl(ruta_dientes) if ruta_dientes else None
+    r = guia_quirurgica(escaneo, dientes, implantes, kit, fabricacion,
+                        mascara, eje, tipo_soporte=soporte, ventanas=ventanas, pines=pines)
 
     ruta_salida = Path(args.salida)
     if not r["valida"]:
@@ -231,19 +243,28 @@ def _guia(args) -> dict:
     for ruta, implante, pc in zip(rutas_implantes, implantes, r["anillos"]):
         angulo = float(np.degrees(np.arccos(np.clip(abs(np.dot(eje, implante.eje)), -1.0, 1.0))))
         anillos.append({"implante_stl": str(ruta), "angulo_eje_insercion_grados": angulo, **pc})
-    entre_implantes = (evaluar_implantes({f"implante_{i + 1}": imp for i, imp in enumerate(implantes)})
-                       if len(implantes) > 1 else None)
-    archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"], *rutas_ventanas]
+    por_nombre = {f"implante_{i + 1}": imp for i, imp in enumerate(implantes)}
+    entre_implantes = evaluar_implantes(por_nombre) if len(implantes) > 1 else None
+    informe_pines = []
+    for ruta, pin, geometria in zip(rutas_pines, pines, r["pines"]):
+        seguridad = evaluar_pin(pin, {"dientes": dientes} if dientes is not None else {}, por_nombre)
+        informe_pines.append({"pin_stl": str(ruta), "diametro_mm": pin.diametro, "largo_mm": pin.largo,
+                              "punta": pin.punta.tolist(), "cabeza": pin.cabeza.tolist(),
+                              "profundidad_en_hueso_mm": profundidad_en_hueso(pin, hueso), **geometria,
+                              "seguridad": seguridad})
+    archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"], *rutas_ventanas,
+                *rutas_pines, *([ruta_hueso] if ruta_hueso else [])]
     return {
         "guia": {"valida": r["valida"], "problemas": r["problemas"], "avisos": r["avisos"],
                  "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
         "ajuste": ajuste,
         "geometria": {"eje_insercion": r["eje_insercion"], "tolerancia_ajuste_mm": r["tolerancia_mm"],
                       "anillos": anillos, "paredes_entre_orificios": r["paredes_entre_orificios"],
-                      "ventanas": r["ventanas"]},
+                      "ventanas": r["ventanas"], "pines": informe_pines},
         "entre_implantes": entre_implantes,
         "parametros": {**{n: str(v) for n, v in rutas.items()}, "implantes_stl": [str(x) for x in rutas_implantes],
-                       "ventanas": [str(x) for x in rutas_ventanas],
+                       "ventanas": [str(x) for x in rutas_ventanas], "pines_stl": [str(x) for x in rutas_pines],
+                       "hueso": str(ruta_hueso) if ruta_hueso else None,
                        "dientes": str(ruta_dientes) if ruta_dientes else None,
                        "apice_hacia": args.apice_hacia, "punto_interior": interior, "fabricacion": fabricacion,
                        "tipo_soporte": soporte, "kit": kit.nombre, "provisionales": sorted(kit.provisionales),
@@ -369,6 +390,8 @@ def _medir(args) -> dict:
                 especificaciones[nombre]["stl"] = str(ruta_caso.parent / datos["stl"])
         varios = "implantes" in caso
         margen_implantes = caso.get("margen_implantes", MARGEN_IMPLANTES_POR_DEFECTO_MM)
+        especificacion_pines = {n: str(ruta_caso.parent / d["stl"]) for n, d in caso.get("pines", {}).items()}
+        margen_pines = caso.get("margen_pines", MARGEN_PIN_POR_DEFECTO_MM)
         margen = caso["margen"]
         sobrefresado = caso.get("sobrefresado_mm", 0.0)
         opcionales = {n: (ruta_caso.parent / caso[n], caso.get(f"margen_{n}", defecto))
@@ -381,6 +404,7 @@ def _medir(args) -> dict:
         especificaciones = {"implante": _implante_desde_argumentos(args)}
         varios = False
         margen_implantes = MARGEN_IMPLANTES_POR_DEFECTO_MM
+        especificacion_pines, margen_pines = {}, MARGEN_PIN_POR_DEFECTO_MM
         if args.canal is None:
             raise ErrorEntrada("faltan parámetros: --canal")
         ruta_canal = Path(args.canal)
@@ -427,6 +451,23 @@ def _medir(args) -> dict:
         resultado = {"semaforo": "rojo" if rojo else "verde", "implantes": por_implante, "entre_implantes": entre}
     else:
         resultado = evaluar_plan(implantes["implante"], estructuras, sobrefresado_mm=sobrefresado)
+    if especificacion_pines:
+        # R-025: cada pin contra canal y dientes completos y contra los implantes, con su margen.
+        if "hueso" not in estructuras:
+            raise ErrorEntrada("los pines necesitan \"hueso\" en el caso: la punta es el extremo dentro del hueso")
+        hueso = estructuras["hueso"][0]
+        resultado["pines"] = {}
+        for nombre, ruta in especificacion_pines.items():
+            pin = Pin.desde_malla(leer_stl(ruta), hueso)
+            archivos.append(Path(ruta))
+            seguridad = evaluar_pin(pin, {n: estructuras[n][0] for n in ("canal", "dientes") if n in estructuras},
+                                    implantes, margen_pines)
+            resultado["pines"][nombre] = {"stl": ruta, "diametro_mm": pin.diametro, "largo_mm": pin.largo,
+                                          "punta": pin.punta.tolist(), "cabeza": pin.cabeza.tolist(),
+                                          "profundidad_en_hueso_mm": profundidad_en_hueso(pin, hueso), **seguridad}
+            if seguridad["semaforo"] == "rojo":
+                resultado["semaforo"] = "rojo"
+        parametros["margen_pines"] = margen_pines
     salida = {
         "resultado": resultado,
         "parametros": parametros,
