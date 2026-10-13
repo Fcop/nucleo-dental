@@ -116,6 +116,10 @@ _Evitar_: holgura (es la del puente sobre la encía), juego, offset
 Cilindro que fija la guía al hueso; su punta es el extremo dentro del hueso y su cabeza queda del lado de la guía, dentro de un refuerzo de resina.
 _Evitar_: tornillo, clavo, anclaje (a secas)
 
+**Texto de la guía**:
+Texto libre grabado (hundido) o en relieve sobre la guía, ubicado con una caja; su trazo mide al menos 0,5 mm.
+_Evitar_: etiqueta, rótulo (a secas)
+
 **Ventana de inspección**:
 Abertura en la guía, sobre un diente de apoyo, para ver si la guía asentó; la define una caja que el usuario ubica, orienta y dimensiona.
 _Evitar_: agujero, perforación (es otra cosa), visor

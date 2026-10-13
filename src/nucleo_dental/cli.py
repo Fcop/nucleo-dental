@@ -170,6 +170,10 @@ def _crear_parser() -> argparse.ArgumentParser:
                                                        "por cada pin. Requiere --hueso (la punta es el extremo en el hueso).")
     g.add_argument("--hueso", help="STL cerrado del hueso (p. ej. Mandible.stl): con --pin-stl, define la punta del pin "
                                    "y cuánto entra en el hueso.")
+    g.add_argument("--texto", help="Texto libre para la guía (no se guarda en ningún archivo del proyecto).")
+    g.add_argument("--caja-texto", help="Caja ROI de Slicer (.mrk.json) donde va el texto: el renglón sigue la arista "
+                                        "más larga y la más corta es la profundidad.")
+    g.add_argument("--relieve", action="store_true", help="Texto en relieve (sobresale); por defecto, grabado (hundido).")
     g.add_argument("--fabricacion", help="impresa (por defecto) o fresada: define ajuste del orificio y tolerancia.")
     g.add_argument("--soporte", help="dentosoportada (por defecto), dentomucosoportada o mucosoportada.")
     g.add_argument("--kit", help="Perfil del kit (por defecto oneguide).")
@@ -195,6 +199,9 @@ def _guia(args) -> dict:
     rutas = {n: Path(getattr(args, n)) for n in ("escaneo", "curva", "plano_oclusal")}
     rutas_implantes = [Path(r) for r in args.implante_stl]
     rutas_ventanas = [Path(r) for r in (args.ventanas or [])]
+    if (args.texto is None) != (args.caja_texto is None):
+        raise ErrorEntrada("--texto y --caja-texto van juntos: el texto y la caja donde se ubica")
+    ruta_caja_texto = Path(args.caja_texto) if args.caja_texto is not None else None
     ventanas = [caja for ruta in rutas_ventanas for caja in leer_cajas_slicer(ruta)]
     ruta_dientes = Path(args.dientes) if args.dientes is not None else None
     rutas_pines = [Path(r) for r in (args.pin_stl or [])]
@@ -214,7 +221,9 @@ def _guia(args) -> dict:
     pines = [Pin.desde_malla(leer_stl(r), hueso) for r in rutas_pines]
     dientes = leer_stl(ruta_dientes) if ruta_dientes else None
     r = guia_quirurgica(escaneo, dientes, implantes, kit, fabricacion,
-                        mascara, eje, tipo_soporte=soporte, ventanas=ventanas, pines=pines)
+                        mascara, eje, tipo_soporte=soporte, ventanas=ventanas, pines=pines,
+                        textos=[{"texto": args.texto, "caja": leer_cajas_slicer(ruta_caja_texto)[0],
+                                 "modo": "relieve" if args.relieve else "grabado"}] if ruta_caja_texto else [])
 
     ruta_salida = Path(args.salida)
     if not r["valida"]:
@@ -253,14 +262,14 @@ def _guia(args) -> dict:
                               "profundidad_en_hueso_mm": profundidad_en_hueso(pin, hueso), **geometria,
                               "seguridad": seguridad})
     archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"], *rutas_ventanas,
-                *rutas_pines, *([ruta_hueso] if ruta_hueso else [])]
+                *rutas_pines, *([ruta_hueso] if ruta_hueso else []), *([ruta_caja_texto] if ruta_caja_texto else [])]
     return {
         "guia": {"valida": r["valida"], "problemas": r["problemas"], "avisos": r["avisos"],
                  "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
         "ajuste": ajuste,
         "geometria": {"eje_insercion": r["eje_insercion"], "tolerancia_ajuste_mm": r["tolerancia_mm"],
                       "anillos": anillos, "paredes_entre_orificios": r["paredes_entre_orificios"],
-                      "ventanas": r["ventanas"], "pines": informe_pines},
+                      "ventanas": r["ventanas"], "pines": informe_pines, "textos": r["textos"]},
         "entre_implantes": entre_implantes,
         "parametros": {**{n: str(v) for n, v in rutas.items()}, "implantes_stl": [str(x) for x in rutas_implantes],
                        "ventanas": [str(x) for x in rutas_ventanas], "pines_stl": [str(x) for x in rutas_pines],

@@ -232,7 +232,7 @@ def _separacion_por_nodo(escaneo, holgura_por_vertice, d_escaneo, origen, espaci
 
 def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: str, mascara_apoyo,
                     eje_insercion, tipo_soporte: str = "dentosoportada", con_puente: bool = False,
-                    espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM, ventanas=(), pines=()) -> dict:
+                    espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM, ventanas=(), pines=(), textos=()) -> dict:
     """Guía completa: carcasa dentro de los límites + un anillo con su orificio por implante (R-021, R-023).
 
     `implantes` es un Implante o una lista: todos comparten el kit y el método
@@ -244,9 +244,12 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
     cubre dientes y un solo implante. `ventanas` son cajas ({"centro", "ejes",
     "tamano"}, p. ej. de apoyo.leer_cajas_slicer) que se restan de la guía:
     ventanas de inspección que el usuario ubica y dimensiona (R-024). `pines`
-    (pines.Pin) suman su refuerzo y restan su agujero (R-025).
+    (pines.Pin) suman su refuerzo y restan su agujero (R-025). `textos` son
+    {"texto", "caja", "modo"} con modo "grabado" (se resta) o "relieve" (se
+    suma), ubicados con una caja ROI (R-026).
     """
     from nucleo_dental.guia import TIPOS_SOPORTE, anillo_y_orificio, caja_como_malla, columna_del_anillo, puente_y_columna
+    from nucleo_dental.grabado import MODOS, revisar_texto, texto_como_malla
     from nucleo_dental.pines import refuerzo_y_agujero
 
     if tipo_soporte not in TIPOS_SOPORTE:
@@ -274,6 +277,13 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
     refuerzos = [refuerzo_y_agujero(pin, escaneo, kit, fabricacion) for pin in pines]
     extras += [r["refuerzo"] for r in refuerzos]
     negativos += [r["agujero"] for r in refuerzos]
+    letras = []
+    for t in textos:                                   # unos pocos textos
+        if t.get("modo", "grabado") not in MODOS:
+            raise ValueError(f"Modo de texto desconocido '{t.get('modo')}'; opciones: " + ", ".join(MODOS))
+        info = texto_como_malla(t["texto"], t["caja"], escaneo, np.asarray(eje_insercion, dtype=float))
+        letras.append((t.get("modo", "grabado"), info))
+        (negativos if t.get("modo", "grabado") == "grabado" else extras).append(info["malla"])
     por_vertice = None
     if holgura > 0:
         if dientes is None:
@@ -288,6 +298,8 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
     resultado["paredes_entre_orificios"] = _revisar_paredes(tramos, resultado)
     resultado["pines"] = [{k: v for k, v in r.items() if k not in ("refuerzo", "agujero", "tramo_agujero")}
                           for r in refuerzos]
+    resultado["textos"] = [revisar_texto(info, modo, resultado["guia"], resultado, f"texto {i}")
+                           for i, (modo, info) in enumerate(letras, start=1)]
     resultado["ventanas"] = _revisar_ventanas(ventanas, resultado, espaciado_mm)
     resultado.update({"anillos": [{k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")}
                                   for pc in anillos],
