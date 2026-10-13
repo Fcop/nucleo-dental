@@ -97,3 +97,24 @@ def test_pdf_con_imagenes_y_varias_paginas(tmp_path):
     pixeles = np.frombuffer(zlib.decompress(flujo), dtype=np.uint8).reshape(40, 60, 3)
     np.testing.assert_array_equal(pixeles[0, 0], [255, 128, 0])
     assert "ñandú".encode("cp1252") in contenido
+
+
+def test_guia_con_canal_mide_la_seguridad_del_plan(corrida, capsys):
+    """Verifica R-027: con --canal, `guia` mide cada implante como `medir` (con el sobrefresado del kit) y el informe lo muestra."""
+    carpeta, argumentos, pdf = corrida
+    canal = vtk.vtkCubeSource()                          # techo del canal en z = −13: 1 mm bajo el ápice (z = −12)
+    canal.SetBounds(-15, 20, -1.5, 1.5, -16, -13)
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputConnection(canal.GetOutputPort())
+    limpio = vtk.vtkCleanPolyData()
+    limpio.SetInputConnection(tri.GetOutputPort())
+    limpio.Update()
+    _escribir_stl(limpio.GetOutput(), carpeta / "canal.stl")
+    assert main(argumentos + ["--canal", str(carpeta / "canal.stl")]) == 0
+    seguridad = json.loads(capsys.readouterr().out)["seguridad"]
+    canal_1 = seguridad["implantes"]["implante_1"]["estructuras"]["canal"]
+    assert canal_1["distancia_mm"] == pytest.approx(1.0 - 0.3, abs=0.01)        # sobrefresado de OneGuide (0,3)
+    assert canal_1["semaforo"] == "rojo" and seguridad["semaforo"] == "rojo"
+    contenido = pdf.read_bytes()
+    for texto in ("Seguridad del plan: ROJO", "Canal: distancia 0,70 mm", "con sobrefresado de 0,30 mm"):
+        assert texto.encode("cp1252") in contenido, texto

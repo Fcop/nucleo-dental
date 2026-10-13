@@ -80,8 +80,13 @@ def lineas_del_informe(salida: dict) -> list:
                               f"Contacto efectivo guía–fresa: {_mm(a['contacto_efectivo_mm'])} mm"),
                    ("normal", f"Ángulo con el eje de inserción: {_mm(a.get('angulo_eje_insercion_grados'), 1)}°   "
                               "Secuencia de fresas: según el manual del kit."),
-                   ("normal", "Distancias al canal, a los dientes y al hueso: ver el informe de `nucleo-dental medir`.")]
+                   *_seguridad_del_implante(salida.get("seguridad"), f"implante_{i}")]
 
+    if salida.get("seguridad"):
+        lineas.insert(lineas.index(("seccion", "Guía")),
+                      ("alerta" if salida["seguridad"]["semaforo"] == "rojo" else "normal",
+                       f"Seguridad del plan: {salida['seguridad']['semaforo'].upper()} (canal, dientes, hueso, pines "
+                       "y entre implantes)."))
     entre = salida.get("entre_implantes")
     if entre:
         lineas.append(("seccion", f"Entre implantes: {entre['semaforo'].upper()}"))
@@ -128,6 +133,24 @@ def lineas_del_informe(salida: dict) -> list:
                ("normal", f"SHA-256: {g['sha256']}")]
     lineas += [("normal", f"{a['ruta']}  SHA-256 {a['sha256'][:16]}…") for a in traz["archivos_entrada"]]
     return lineas
+
+
+def _seguridad_del_implante(seguridad, nombre: str) -> list:
+    """Renglones con el semáforo del implante contra cada estructura medida (o la remisión a `medir`)."""
+    if not seguridad:
+        return [("normal", "Distancias al canal, a los dientes y al hueso: no se midieron (agregue --canal y --hueso, "
+                           "o use `nucleo-dental medir`).")]
+    renglones = []
+    for estructura, r in seguridad["implantes"][nombre]["estructuras"].items():
+        if "espesor_minimo_mm" in r:
+            valor = (f"espesor óseo mínimo {_mm(r['espesor_minimo_mm'])} mm, exposición {_mm(r['exposicion_maxima_mm'])} mm")
+        else:
+            valor = f"distancia {_mm(r['distancia_mm'])} mm" + (" (COLISIÓN)" if r.get("colision") else "")
+            if r.get("sobrefresado_mm"):
+                valor += f" con sobrefresado de {_mm(r['sobrefresado_mm'])} mm"
+        renglones.append(("alerta" if r["semaforo"] == "rojo" else "normal",
+                          f"{estructura.capitalize()}: {valor}; margen {_mm(r['margen_mm'])} mm, {r['semaforo'].upper()}"))
+    return renglones
 
 
 def escribir_pdf(lineas: list, ruta, imagenes=()) -> None:

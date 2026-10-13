@@ -168,8 +168,13 @@ def _crear_parser() -> argparse.ArgumentParser:
                                                         "Repetir por cada archivo.")
     g.add_argument("--pin-stl", action="append", help="Pin de fijación: STL de un cilindro ubicado en Slicer; repetir "
                                                        "por cada pin. Requiere --hueso (la punta es el extremo en el hueso).")
-    g.add_argument("--hueso", help="STL cerrado del hueso (p. ej. Mandible.stl): con --pin-stl, define la punta del pin "
-                                   "y cuánto entra en el hueso.")
+    g.add_argument("--hueso", help="STL cerrado del hueso (p. ej. Mandible.stl): espesor óseo de cada implante y, con "
+                                   "--pin-stl, la punta del pin y cuánto entra en el hueso.")
+    g.add_argument("--canal", help="STL cerrado del canal mandibular: distancia de cada implante (con el sobrefresado "
+                                   "del kit) y de cada pin.")
+    g.add_argument("--margen-canal", help=f"Margen al canal en mm (por defecto {MARGEN_POR_DEFECTO_MM}).")
+    g.add_argument("--margen-dientes", help=f"Margen a los dientes en mm (por defecto {MARGEN_DIENTES_POR_DEFECTO_MM}).")
+    g.add_argument("--margen-hueso", help=f"Espesor óseo mínimo en mm (por defecto {MARGEN_HUESO_POR_DEFECTO_MM}).")
     g.add_argument("--texto", help="Texto libre para la guía (no se guarda en ningún archivo del proyecto).")
     g.add_argument("--caja-texto", help="Caja ROI de Slicer (.mrk.json) donde va el texto: el renglón sigue la arista "
                                         "más larga y la más corta es la profundidad.")
@@ -210,6 +215,11 @@ def _guia(args) -> dict:
     if rutas_pines and args.hueso is None:
         raise ErrorEntrada("--pin-stl necesita --hueso: la punta del pin es el extremo que queda dentro del hueso")
     ruta_hueso = Path(args.hueso) if args.hueso is not None else None
+    ruta_canal = Path(args.canal) if args.canal is not None else None
+    margen_canal = MARGEN_POR_DEFECTO_MM if args.margen_canal is None else _numero(args.margen_canal, "--margen-canal")
+    margen_dientes = (MARGEN_DIENTES_POR_DEFECTO_MM if args.margen_dientes is None
+                      else _numero(args.margen_dientes, "--margen-dientes"))
+    margen_hueso = MARGEN_HUESO_POR_DEFECTO_MM if args.margen_hueso is None else _numero(args.margen_hueso, "--margen-hueso")
     fabricacion = args.fabricacion or "impresa"
     kit = obtener_kit(args.kit or "oneguide")
 
@@ -256,15 +266,30 @@ def _guia(args) -> dict:
         anillos.append({"implante_stl": str(ruta), "angulo_eje_insercion_grados": angulo, **pc})
     por_nombre = {f"implante_{i + 1}": imp for i, imp in enumerate(implantes)}
     entre_implantes = evaluar_implantes(por_nombre) if len(implantes) > 1 else None
+    canal = leer_stl(ruta_canal) if ruta_canal else None
+    # Seguridad del plan (como `medir`): cada implante contra canal (con el sobrefresado del kit), dientes y hueso.
+    estructuras = {n: (m, margen) for n, m, margen in (("canal", canal, margen_canal), ("dientes", dientes, margen_dientes),
+                                                       ("hueso", hueso, margen_hueso)) if m is not None}
+    seguridad = None
+    if estructuras:
+        por_implante = {n: evaluar_plan(i, estructuras, sobrefresado_mm=kit.sobrefresado_mm) for n, i in por_nombre.items()}
+        rojo = (any(x["semaforo"] == "rojo" for x in por_implante.values())
+                or (entre_implantes is not None and entre_implantes["semaforo"] == "rojo"))
+        seguridad = {"semaforo": "rojo" if rojo else "verde", "implantes": por_implante,
+                     "sobrefresado_mm": kit.sobrefresado_mm}
     informe_pines = []
     for ruta, pin, geometria in zip(rutas_pines, pines, r["pines"]):
-        seguridad = evaluar_pin(pin, {"dientes": dientes} if dientes is not None else {}, por_nombre)
+        seguridad_pin = evaluar_pin(pin, {n: m for n, m in (("canal", canal), ("dientes", dientes)) if m is not None},
+                                    por_nombre)
+        if seguridad is not None and seguridad_pin["semaforo"] == "rojo":
+            seguridad["semaforo"] = "rojo"
         informe_pines.append({"pin_stl": str(ruta), "diametro_mm": pin.diametro, "largo_mm": pin.largo,
                               "punta": pin.punta.tolist(), "cabeza": pin.cabeza.tolist(),
                               "profundidad_en_hueso_mm": profundidad_en_hueso(pin, hueso), **geometria,
-                              "seguridad": seguridad})
+                              "seguridad": seguridad_pin})
     archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"], *rutas_ventanas,
-                *rutas_pines, *([ruta_hueso] if ruta_hueso else []), *([ruta_caja_texto] if ruta_caja_texto else [])]
+                *rutas_pines, *([ruta_hueso] if ruta_hueso else []), *([ruta_caja_texto] if ruta_caja_texto else []),
+                *([ruta_canal] if ruta_canal else [])]
     salida = {
         "guia": {"valida": r["valida"], "problemas": r["problemas"], "avisos": r["avisos"],
                  "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
@@ -273,9 +298,12 @@ def _guia(args) -> dict:
                       "anillos": anillos, "paredes_entre_orificios": r["paredes_entre_orificios"],
                       "ventanas": r["ventanas"], "pines": informe_pines, "textos": r["textos"]},
         "entre_implantes": entre_implantes,
+        "seguridad": seguridad,
         "parametros": {**{n: str(v) for n, v in rutas.items()}, "implantes_stl": [str(x) for x in rutas_implantes],
                        "ventanas": [str(x) for x in rutas_ventanas], "pines_stl": [str(x) for x in rutas_pines],
                        "hueso": str(ruta_hueso) if ruta_hueso else None,
+                       "canal": str(ruta_canal) if ruta_canal else None, "margen_canal": margen_canal,
+                       "margen_dientes": margen_dientes, "margen_hueso": margen_hueso,
                        "dientes": str(ruta_dientes) if ruta_dientes else None,
                        "apice_hacia": args.apice_hacia, "punto_interior": interior, "fabricacion": fabricacion,
                        "tipo_soporte": soporte, "kit": kit.nombre, "provisionales": sorted(kit.provisionales),
