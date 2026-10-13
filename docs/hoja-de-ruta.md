@@ -46,7 +46,8 @@ Reutiliza los motores MIT `malla_guia`, `undercut_core` y `tolerancia`, y el esc
 - ✅ Caso dorado 019 de pines; refuerzo = agujero + 2 mm en total; alto 3 mm (por ahora)
 - ✅ Texto grabado o en relieve (R-026): libre, en una caja ROI; trazo ≥ 0,5 mm y ≥ 1 mm de resina bajo el grabado
 - ☐ En la app: texto con el id del caso o parámetros guardados (decisión 2026-10-13)
-- ☐ Informe del protocolo quirúrgico (PDF): kit, orificio, largo de trabajo de la fresa, offset
+- ✅ Informe del protocolo quirúrgico en PDF (R-027)
+- ☐ Secuencia de fresas por kit (cuando tengamos los datos del fabricante)
   (Ideas de funciones tomadas de B4D Guide3, software propietario: solo la idea, implementación propia)
 - ☐ Otros métodos de eje de inserción en la app: plano de la vista, flecha, búsqueda del eje con menos undercut (`buscar_eje` de GuiaCorte) (etapa 5)
 - ☐ Problemas de los módulos externos de Slicer, para corregirlos en sus proyectos: `docs/problemas-modulos-externos.md`

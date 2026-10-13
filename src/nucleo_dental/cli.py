@@ -178,6 +178,8 @@ def _crear_parser() -> argparse.ArgumentParser:
     g.add_argument("--soporte", help="dentosoportada (por defecto), dentomucosoportada o mucosoportada.")
     g.add_argument("--kit", help="Perfil del kit (por defecto oneguide).")
     g.add_argument("--salida", help="Ruta del STL de la guía.")
+    g.add_argument("--informe", help="Ruta del PDF con el protocolo quirúrgico (kit, orificios, largo de trabajo de "
+                                     "la fresa, pines, ajuste, validación, trazabilidad e imágenes de la guía).")
     return parser
 
 
@@ -263,7 +265,7 @@ def _guia(args) -> dict:
                               "seguridad": seguridad})
     archivos = [rutas["escaneo"], *rutas_implantes, rutas["curva"], rutas["plano_oclusal"], *rutas_ventanas,
                 *rutas_pines, *([ruta_hueso] if ruta_hueso else []), *([ruta_caja_texto] if ruta_caja_texto else [])]
-    return {
+    salida = {
         "guia": {"valida": r["valida"], "problemas": r["problemas"], "avisos": r["avisos"],
                  "metricas": r["metricas"], "ruta": str(ruta_salida.resolve()), "sha256": _sha256(ruta_salida)},
         "ajuste": ajuste,
@@ -280,6 +282,13 @@ def _guia(args) -> dict:
                        "sistema_coordenadas": "LPS", "unidades": "mm"},
         "trazabilidad": _trazabilidad(archivos + ([ruta_dientes] if ruta_dientes else [])),
     }
+    if args.informe is not None:
+        from nucleo_dental.informe import escribir_pdf, lineas_del_informe, vistas_de_la_guia
+
+        ruta_informe = Path(args.informe)
+        escribir_pdf(lineas_del_informe(salida), ruta_informe, vistas_de_la_guia(r["guia"], escaneo, eje))
+        salida["informe"] = {"ruta": str(ruta_informe.resolve()), "sha256": _sha256(ruta_informe)}
+    return salida
 
 
 def _apoyo(args) -> dict:
