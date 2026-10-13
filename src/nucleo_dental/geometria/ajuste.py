@@ -60,8 +60,10 @@ def analizar_ajuste(guia: vtk.vtkPolyData, escaneo: vtk.vtkPolyData, tolerancia_
     desvio_aceptable_mm : banda alrededor del objetivo que cuenta como
         "ideal" (confirmado por Francisco el 2026-10-09).
     """
+    from nucleo_dental.geometria.malla_guia import sin_normales_previas
+
     nf = vtk.vtkPolyDataNormals()
-    nf.SetInputData(guia)
+    nf.SetInputData(sin_normales_previas(guia))
     nf.ComputePointNormalsOn()
     nf.ComputeCellNormalsOff()
     nf.SplittingOff()

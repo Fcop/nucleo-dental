@@ -131,16 +131,21 @@ def test_parche_a_solido_cuadrado_plano():
 
 
 def test_holgura_y_espesor_no_entran_en_la_encia():
-    """Verifica R-019 (RG-017): sobre un surco de encía más angosto que la holgura, ningún punto del puente queda bajo la encía.
+    """Verifica R-019 (RG-017): sobre un surco de ~3 mm de ancho, holgura y espesor con un solo campo de normales no entran en la encía.
 
     Antes la holgura se aplicaba primero y las normales se recalculaban sobre la capa
     desplazada: en el surco esa capa se pliega, las normales se invierten y el espesor
-    se extruía hacia el tejido (en el caso real llegó 1,7 mm dentro del hueso).
+    se extruía hacia el tejido (en el caso real llegó 1,7 mm dentro del hueso). Aquí el
+    método antiguo entra ~4 mm. Las normales son las REALES del surco: la primera
+    versión de este test deformaba un vtkPlaneSource, que trae normales +z heredadas, y
+    pasaba por eso (RG-021). En un surco más angosto que el desplazamiento (1,2 mm)
+    ningún desplazamiento normal evita la pared opuesta: ahí protege la resta del
+    escaneo en el ensamblaje (test_guia_completa_no_entra_en_el_escaneo).
     """
-    from nucleo_dental.geometria.malla_guia import parche_a_solido
+    from nucleo_dental.geometria.malla_guia import _normales, parche_a_solido
 
     def encia(x):
-        return -3.0 * np.exp(-(x / 0.6) ** 2)          # surco de 3 mm de hondo y ~1,2 mm de ancho
+        return -3.0 * np.exp(-(x / 1.5) ** 2)          # surco de 3 mm de hondo y ~3 mm de ancho
 
     plano = vtk.vtkPlaneSource()
     plano.SetOrigin(-6, -4, 0)
@@ -150,15 +155,31 @@ def test_holgura_y_espesor_no_entran_en_la_encia():
     tri = vtk.vtkTriangleFilter()
     tri.SetInputConnection(plano.GetOutputPort())
     tri.Update()
-    superficie = tri.GetOutput()
+    superficie = vtk.vtkPolyData()
+    superficie.DeepCopy(tri.GetOutput())
+    superficie.GetPointData().SetNormals(None)                       # sin las normales +z del plano
+    superficie.GetPointData().RemoveArray("Normals")
     puntos = numpy_support.vtk_to_numpy(superficie.GetPoints().GetData())
     puntos[:, 2] = encia(puntos[:, 0])
     superficie.GetPoints().Modified()
 
+    def bajo_la_encia(solido):
+        p = numpy_support.vtk_to_numpy(solido.GetPoints().GetData())
+        return -(p[:, 2] - encia(p[:, 0])).min()
+
     solido = parche_a_solido(superficie, 3.0, desfase=1.0, suavizado_normales=10)
-    p = numpy_support.vtk_to_numpy(solido.GetPoints().GetData())
-    assert (p[:, 2] - encia(p[:, 0])).min() >= 1.0 - 1e-6           # todo queda al menos a la holgura
+    assert bajo_la_encia(solido) <= 0.1                              # a lo más roza la pared del surco
     assert _cerrada(solido)
+
+    con_normales = _normales(superficie)                             # el método antiguo: desplazar y recalcular
+    con_normales.GetPointData().SetActiveVectors("Normals")
+    desplazada = vtk.vtkWarpVector()
+    desplazada.SetInputData(con_normales)
+    desplazada.SetScaleFactor(1.0)
+    desplazada.Update()
+    piso = vtk.vtkPolyData()
+    piso.DeepCopy(desplazada.GetOutput())
+    assert bajo_la_encia(parche_a_solido(piso, 3.0)) > 2.0           # entraba en el tejido
 
 
 def test_alisar_borde_quita_la_escalera_sin_tocar_el_interior():

@@ -31,6 +31,7 @@ from __future__ import annotations
 import numpy as np
 
 from nucleo_dental.implante import Implante
+from nucleo_dental.grabado import RESINA_BAJO_GRABADO_MM
 from nucleo_dental.kits import PerfilKit
 
 ESPACIADO_POR_DEFECTO_MM = 0.15   # lado del vóxel de la grilla de campos
@@ -39,6 +40,10 @@ _PASADAS_NORMALES_APOYO = 10
 _PASADAS_BORDE_APOYO = 10
 _LEJOS_MM = 1000.0
 _ARRAY_HOLGURA = "HolguraEncia"
+# Texto (R-026): se graba solo donde la superficie mira hacia la caja (a menos de
+# 70° de su normal) y solo en la capa que llega hasta 0,5 mm sobre la cara externa.
+COSENO_CARA_VISIBLE = float(np.cos(np.radians(70.0)))
+_SOBRE_LA_CARA_MM = 0.5
 # Piezas sueltas por debajo de este volumen se descartan como astillas: aparecen
 # donde la cara externa se pliega sobre una fisura cóncava (caso real: 0,02 y
 # 0,08 mm³). Una pieza real de una carcasa de 3 mm supera los 3 mm³.
@@ -138,13 +143,19 @@ def holgura_sobre_encia(escaneo, dientes, holgura_mm: float) -> np.ndarray:
 def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos=(),
               espaciado_mm: float = ESPACIADO_POR_DEFECTO_MM,
               volumen_minimo_pieza_mm3: float = VOLUMEN_MINIMO_PIEZA_MM3,
-              holgura_por_vertice=None) -> dict:
+              holgura_por_vertice=None, textos=()) -> dict:
     """Une los positivos, aplica tolerancia y desbloqueo por el eje, resta los negativos y valida.
 
     `holgura_por_vertice` (mm, un valor por vértice del escaneo, p. ej. la
     holgura sobre la encía) sube la separación mínima a máx(T, holgura) en
     cada lugar, para TODAS las piezas: la base plana de la columna también
     respeta la holgura donde la encía sube hacia un lado.
+
+    `textos` (R-026) siguen la superficie: cada uno es {"prisma", "profundidad",
+    "modo", "espesor"}, con el contorno de las letras extruido a lo largo de
+    la normal de su caja. La cara externa de la guía está a (espesor +
+    holgura) del escaneo; el grabado quita, dentro del prisma, la capa de
+    `profundidad` bajo esa cara, y el relieve suma la misma capa por fuera.
 
     positivos, negativos: sólidos cerrados (vtkPolyData). Devuelve {"guia",
     "valida", "problemas", "metricas", ...}. Una guía no válida se devuelve
@@ -170,7 +181,9 @@ def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos
     negativos_z = [tl._triangular(uc._aplicar_matriz(n, a_z)) for n in negativos]
     escaneo_z = tl._triangular(uc._aplicar_matriz(escaneo, a_z))
 
-    origen, dims = _grilla_comun(positivos_z, espaciado_mm, _MARGEN_GRILLA_MM + tolerancia_mm)
+    textos_z = [dict(t) for t in textos]
+    alto_relieve = max([t["profundidad"] for t in textos if t["modo"] == "relieve"], default=0.0)
+    origen, dims = _grilla_comun(positivos_z, espaciado_mm, _MARGEN_GRILLA_MM + tolerancia_mm + alto_relieve)
 
     def campo(malla, cerca_fuera_mm: float = 0.0):
         dentro = tl._dentro(malla, origen, dims, espaciado_mm)
@@ -181,17 +194,51 @@ def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos
 
     union = np.max([campo(p) for p in positivos_z], axis=0)
     holgura_max = 0.0 if holgura_por_vertice is None else float(np.max(holgura_por_vertice))
-    d_escaneo = campo(escaneo_z, cerca_fuera_mm=max(tolerancia_mm, holgura_max) + 2 * espaciado_mm)
+    alcance_textos = max([t["espesor"] + holgura_max + t["profundidad"] for t in textos], default=0.0)
+    d_escaneo = campo(escaneo_z, cerca_fuera_mm=max(tolerancia_mm, holgura_max, alcance_textos) + 2 * espaciado_mm)
     dilatado = d_escaneo + tolerancia_mm
-    separacion = np.full_like(d_escaneo, tolerancia_mm)
-    if holgura_max > tolerancia_mm:
-        separacion = _separacion_por_nodo(escaneo_z, holgura_por_vertice, d_escaneo, origen, espaciado_mm,
-                                          tolerancia_mm, holgura_max)
+    holgura = np.zeros_like(d_escaneo)
+    if holgura_max > 0:
+        holgura = _holgura_por_nodo(escaneo_z, holgura_por_vertice, d_escaneo, origen, espaciado_mm,
+                                    max(holgura_max, alcance_textos))
+    separacion = np.maximum(tolerancia_mm, holgura)
+    fuera = -d_escaneo
+    informes_textos = []
+    if textos_z:
+        # Hacia dónde mira la superficie en cada nodo: el gradiente de la distancia al escaneo (grilla z, y, x).
+        gz, gy, gx = np.gradient(fuera, espaciado_mm)
+        largo_gradiente = np.sqrt(gx ** 2 + gy ** 2 + gz ** 2) + 1e-12
+    for t in textos_z:                                  # unos pocos textos
+        n = rotacion @ np.asarray(t["afuera"], dtype=float)
+        # Solo la superficie que mira hacia la caja: el prisma no graba la cara opuesta de la arcada.
+        mira = (gx * n[0] + gy * n[1] + gz * n[2]) / largo_gradiente > COSENO_CARA_VISIBLE
+        prisma = np.where(mira, _campo_de_texto(t, rotacion, origen, dims, espaciado_mm), -_LEJOS_MM)
+        cara = t["espesor"] + holgura                    # distancia de la cara externa al escaneo, por nodo
+        if t["modo"] == "relieve":
+            capa = np.minimum.reduce([prisma, fuera - (cara - 2 * espaciado_mm), cara + t["profundidad"] - fuera])
+            union = np.maximum(union, capa)
+        t["_prisma"], t["_cara"] = prisma, cara
+
     # Sombra: máximo de `dilatado` en los nodos estrictamente por encima (eje 0 de la grilla = z).
     acumulado = np.maximum.accumulate(dilatado[::-1], axis=0)[::-1]
     sombra = np.full_like(dilatado, -_LEJOS_MM)
     sombra[:-1] = acumulado[1:]
     f = np.minimum.reduce([union, -(d_escaneo + separacion), -sombra] + [-campo(n) for n in negativos_z])
+    for t in textos_z:
+        prisma, cara, delta = t["_prisma"], t["_cara"], t["profundidad"]
+        if t["modo"] == "grabado":
+            # Solo la capa junto a la cara externa: lo que esté más arriba (p. ej. el anillo) no se toca.
+            f = np.minimum(f, -np.minimum.reduce([prisma, fuera - (cara - delta), cara + _SOBRE_LA_CARA_MM - fuera]))
+            # bajo el fondo debe quedar resina: nodos del prisma 0,1 a 1 mm bajo el fondo, donde había guía
+            debajo = (prisma > 0) & (fuera <= cara - delta - 0.1) & (fuera >= cara - delta - RESINA_BAJO_GRABADO_MM) & (union > 0)
+            resina_ok = bool(np.all(f[debajo] > 0)) if debajo.any() else False
+        else:
+            resina_ok = True
+        # Bajo las letras, a media profundidad (dentro de la resina): ¿había guía ahí?
+        medio = cara - 0.5 * min(delta, t["espesor"])
+        letras = (prisma > 0) & (np.abs(fuera - medio) <= espaciado_mm)
+        sobre_guia = float((union[letras] > 0).mean()) if letras.any() else 0.0
+        informes_textos.append({"resina_bajo_grabado_suficiente": resina_ok, "fraccion_sobre_la_guia": sobre_guia})
 
     guia_z = tl._superficie(f, origen, espaciado_mm)
     if guia_z.GetNumberOfPoints() == 0:
@@ -210,24 +257,41 @@ def ensamblar(positivos, escaneo, eje_insercion, tolerancia_mm: float, negativos
         "eje_insercion": eje.tolist(),
         "tolerancia_mm": float(tolerancia_mm),
         "espaciado_mm": float(espaciado_mm),
+        "textos": informes_textos,
     }
 
 
-def _separacion_por_nodo(escaneo, holgura_por_vertice, d_escaneo, origen, espaciado: float,
-                         tolerancia: float, holgura_max: float) -> np.ndarray:
-    """Separación mínima en cada nodo: máx(T, holgura del vértice del escaneo más cercano).
+def _campo_de_texto(texto: dict, rotacion, origen, dims, espaciado: float) -> np.ndarray:
+    """Campo del prisma de un texto en la grilla rotada: se evalúa solo en la caja que lo envuelve."""
+    campo = np.full((dims[2], dims[1], dims[0]), -_LEJOS_MM, dtype=np.float32)
+    b = np.array(texto["prisma"].GetBounds()).reshape(3, 2)
+    esquinas = np.array([[b[0, i], b[1, j], b[2, k]] for i in (0, 1) for j in (0, 1) for k in (0, 1)]) @ rotacion.T
+    bajo = np.floor((esquinas.min(axis=0) - origen) / espaciado).astype(int) - 1
+    alto = np.ceil((esquinas.max(axis=0) - origen) / espaciado).astype(int) + 1
+    bajo = np.clip(bajo, 0, np.array(dims) - 1)
+    alto = np.clip(alto, 0, np.array(dims) - 1)
+    ii, jj, kk = np.meshgrid(*(np.arange(bajo[d], alto[d] + 1) for d in range(3)), indexing="ij")   # x, y, z
+    nodos = np.column_stack([ii.ravel(), jj.ravel(), kk.ravel()]) * espaciado + np.asarray(origen, dtype=float)
+    valores = texto["evaluar"](nodos @ rotacion)                   # de la grilla rotada al mundo
+    campo[kk.ravel(), jj.ravel(), ii.ravel()] = valores
+    return campo
 
-    Solo se interpola en los nodos cercanos al escaneo, que son los únicos
-    donde el término puede ser el mínimo.
+
+def _holgura_por_nodo(escaneo, holgura_por_vertice, d_escaneo, origen, espaciado: float,
+                      alcance: float) -> np.ndarray:
+    """Holgura del vértice del escaneo más cercano, en los nodos a menos de `alcance` del escaneo (0 en el resto).
+
+    Solo se interpola cerca del escaneo, que es donde se usa: la separación
+    mínima y la altura de la cara externa bajo un texto.
     """
     from nucleo_dental.geometria.ajuste import _valor_del_vertice_mas_cercano
 
-    separacion = np.full_like(d_escaneo, tolerancia)
-    cerca = np.abs(d_escaneo) <= holgura_max + 3 * espaciado
+    holgura = np.zeros_like(d_escaneo)
+    cerca = np.abs(d_escaneo) <= alcance + 3 * espaciado
     k, j, i = np.nonzero(cerca)                                   # la grilla es (z, y, x)
     nodos = np.column_stack([i, j, k]) * espaciado + np.asarray(origen, dtype=float)
-    separacion[cerca] = np.maximum(tolerancia, _valor_del_vertice_mas_cercano(escaneo, holgura_por_vertice, nodos))
-    return separacion
+    holgura[cerca] = _valor_del_vertice_mas_cercano(escaneo, holgura_por_vertice, nodos)
+    return holgura
 
 
 def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: str, mascara_apoyo,
@@ -283,7 +347,6 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
             raise ValueError(f"Modo de texto desconocido '{t.get('modo')}'; opciones: " + ", ".join(MODOS))
         info = texto_como_malla(t["texto"], t["caja"], escaneo, np.asarray(eje_insercion, dtype=float))
         letras.append((t.get("modo", "grabado"), info))
-        (negativos if t.get("modo", "grabado") == "grabado" else extras).append(info["malla"])
     por_vertice = None
     if holgura > 0:
         if dientes is None:
@@ -291,15 +354,19 @@ def guia_quirurgica(escaneo, dientes, implantes, kit: PerfilKit, fabricacion: st
         por_vertice = holgura_sobre_encia(escaneo, dientes, holgura)
     positivos = piezas_de_apoyo(escaneo, mascara_apoyo, kit, eje_insercion, por_vertice) + extras
     resultado = ensamblar(positivos, escaneo, eje_insercion, kit.tolerancia_ajuste(fabricacion),
-                          negativos=negativos, espaciado_mm=espaciado_mm, holgura_por_vertice=por_vertice)
+                          negativos=negativos, espaciado_mm=espaciado_mm, holgura_por_vertice=por_vertice,
+                          textos=[{"prisma": info["malla"], "evaluar": info["evaluar"],
+                                   "profundidad": info["profundidad_mm"], "modo": modo,
+                                   "espesor": kit.espesor_plantilla_mm, "afuera": info["afuera"]}
+                                  for modo, info in letras])
     resultado["avisos"] = []
     tramos = [(f"orificio {i}", _tramo_del_orificio(imp, pc)) for i, (imp, pc) in enumerate(zip(implantes, anillos), 1)]
     tramos += [(f"pin {i}", r["tramo_agujero"]) for i, r in enumerate(refuerzos, 1)]
     resultado["paredes_entre_orificios"] = _revisar_paredes(tramos, resultado)
     resultado["pines"] = [{k: v for k, v in r.items() if k not in ("refuerzo", "agujero", "tramo_agujero")}
                           for r in refuerzos]
-    resultado["textos"] = [revisar_texto(info, modo, resultado["guia"], resultado, f"texto {i}")
-                           for i, (modo, info) in enumerate(letras, start=1)]
+    resultado["textos"] = [revisar_texto(info, modo, campo_texto, resultado, f"texto {i}")
+                           for i, ((modo, info), campo_texto) in enumerate(zip(letras, resultado["textos"]), start=1)]
     resultado["ventanas"] = _revisar_ventanas(ventanas, resultado, espaciado_mm)
     resultado.update({"anillos": [{k: v for k, v in pc.items() if k not in ("puente", "columna", "alivio")}
                                   for pc in anillos],

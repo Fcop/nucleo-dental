@@ -335,10 +335,26 @@ def suavizar_parche(parche: vtk.vtkPolyData, iteraciones: int = 20,
     return sm.GetOutput()
 
 
+def sin_normales_previas(pd: vtk.vtkPolyData) -> vtk.vtkPolyData:
+    """Copia liviana sin normales de punto ni de celda.
+
+    vtkPolyDataNormals conserva un arreglo "Normals" que ya traiga la malla
+    (p. ej. de vtkCylinderSource, o interpolado por una subdivision) en vez de
+    recalcularlo: con normales viejas la carcasa se extruia hacia adentro.
+    Las normales se calculan siempre desde el winding de los triangulos.
+    """
+    copia = vtk.vtkPolyData()
+    copia.ShallowCopy(pd)
+    for datos in (copia.GetPointData(), copia.GetCellData()):
+        datos.SetNormals(None)
+        datos.RemoveArray("Normals")
+    return copia
+
+
 def _normales(pd: vtk.vtkPolyData, auto_orientar: bool = False,
               invertir: bool = False) -> vtk.vtkPolyData:
     nf = vtk.vtkPolyDataNormals()
-    nf.SetInputData(pd)
+    nf.SetInputData(sin_normales_previas(pd))
     nf.ComputePointNormalsOn()
     nf.ComputeCellNormalsOff()
     nf.ConsistencyOn()
@@ -470,7 +486,9 @@ def parche_a_solido(parche: vtk.vtkPolyData,
         suma = normales.copy()
         for k in range(3):   # cada vertice recibe las normales de los otros dos vertices de cada triangulo
             np.add.at(suma, triangulos[:, k], normales[triangulos[:, (k + 1) % 3]] + normales[triangulos[:, (k + 2) % 3]])
-        normales = suma / np.linalg.norm(suma, axis=1, keepdims=True)
+        largo = np.linalg.norm(suma, axis=1, keepdims=True)
+        # vertices sin triangulos (sueltos en el parche) suman 0: conservan su normal en vez de dar NaN
+        normales = np.divide(suma, largo, out=normales.copy(), where=largo > 0)
     coordenadas = np.vstack([base + desfase * normales, base + (desfase + grosor) * normales])
     intrados = triangulos[:, ::-1]                 # winding invertido: la normal sale del sólido
     extrados = triangulos + n_pts                  # winding original, desplazado

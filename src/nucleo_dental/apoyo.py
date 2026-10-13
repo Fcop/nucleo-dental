@@ -244,8 +244,10 @@ def _puntos(malla: vtk.vtkPolyData) -> np.ndarray:
 
 
 def _normales(malla: vtk.vtkPolyData) -> np.ndarray:
+    from nucleo_dental.geometria.malla_guia import sin_normales_previas
+
     filtro = vtk.vtkPolyDataNormals()
-    filtro.SetInputData(malla)
+    filtro.SetInputData(sin_normales_previas(malla))
     filtro.ComputePointNormalsOn()
     filtro.ComputeCellNormalsOff()
     filtro.ConsistencyOn()

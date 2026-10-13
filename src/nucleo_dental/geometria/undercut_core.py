@@ -479,8 +479,14 @@ def _superficie(arr: np.ndarray, origin, spacing: float,
 # ---------------------------------------------------------------------------
 
 def _normales_de_celda(pd: vtk.vtkPolyData) -> np.ndarray:
+    # Sin normales previas: vtkPolyDataNormals conservaria las que traiga la malla.
+    copia = vtk.vtkPolyData()
+    copia.ShallowCopy(pd)
+    for datos in (copia.GetPointData(), copia.GetCellData()):
+        datos.SetNormals(None)
+        datos.RemoveArray("Normals")
     nf = vtk.vtkPolyDataNormals()
-    nf.SetInputData(pd)
+    nf.SetInputData(copia)
     nf.ComputeCellNormalsOn()
     nf.ComputePointNormalsOff()
     nf.SplittingOff()
