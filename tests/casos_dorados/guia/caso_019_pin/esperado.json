@@ -1,0 +1,10 @@
+{
+  "profundidad_en_hueso_mm": 8.49,
+  "entrada_en_encia": [13.0, 0.0, 0.0],
+  "diametro_agujero_mm": 1.8,
+  "diametro_refuerzo_mm": 3.8,
+  "distancia_pin_implante_mm": 3.42,
+  "semaforo": "verde",
+  "tolerancia_mm": 0.01,
+  "origen": "Francisco, 2026-10-13: profundidad 8,49 (primero respondió 6, la subida en z; corregida tras el diagrama del triángulo a 45°); el refuerzo suma 2 mm en TOTAL al diámetro del agujero (decisión clínica); semáforo verde. Calculados por Claude por delegación de Francisco (2026-10-13): entrada en (13, 0) = punta (6, -7) + 7 en x y 7 en z; agujero 1,5 + 0,3 = 1,8 (no respondido directamente; su primera respuesta, 3,3, suponía un pin de Ø3); refuerzo 1,8 + 2 = 3,8; distancia: borde de la punta en x = 6 - 0,75·cos 45° = 5,470, menos 2,05 = 3,420."
+}

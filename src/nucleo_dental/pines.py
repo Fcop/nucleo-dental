@@ -11,7 +11,7 @@ pin suele ir inclinado (vestibular), así que la punta no se decide por
 
 Se informa cuánto entra en el hueso (sin mínimo) y se evalúa como un implante
 contra canal, dientes e implantes, con margen de 2 mm configurable. En la guía
-lleva un refuerzo de resina (pared y alto configurables en el kit) y un
+lleva un refuerzo de resina (el agujero + 2 mm en total, y su alto, configurables en el kit) y un
 agujero del diámetro del pin más el ajuste por fabricación.
 """
 
@@ -95,7 +95,8 @@ def refuerzo_y_agujero(pin: Pin, escaneo, kit: PerfilKit, fabricacion: str) -> d
     if entrada is None:
         raise ValueError("El eje del pin no atraviesa el escaneo: revisa su posición.")
     diametro_agujero = pin.diametro + kit.ajuste_pin(fabricacion)
-    diametro_refuerzo = diametro_agujero + 2 * kit.pared_refuerzo_pin_mm
+    # La pared del refuerzo es el TOTAL que se suma al diámetro, no por lado (decisión 2026-10-13).
+    diametro_refuerzo = diametro_agujero + kit.sobre_diametro_refuerzo_pin_mm
     refuerzo = Implante(diametro_refuerzo, kit.alto_refuerzo_pin_mm, entrada, pin.eje)
     largo_agujero = float(np.linalg.norm(pin.cabeza - pin.punta)) + 1.0 + _PROLONGACION_AGUJERO_MM
     agujero = Implante(diametro_agujero, largo_agujero, pin.punta - 1.0 * pin.eje, pin.eje)

@@ -29,7 +29,7 @@ class PerfilKit:
     profundidad_puente_mm: float = 6.0     # hasta dónde baja el puente bajo la cresta, a lo largo del eje
     tolerancia_ajuste_mm: dict = field(default_factory=dict)    # juego guía–diente según método
     ajuste_pin_mm: dict = field(default_factory=dict)           # holgura del agujero del pin según método
-    pared_refuerzo_pin_mm: float = 2.0     # pared de resina alrededor del agujero del pin
+    sobre_diametro_refuerzo_pin_mm: float = 2.0   # el refuerzo mide el agujero + esto en TOTAL (1 mm por lado)
     alto_refuerzo_pin_mm: float = 3.0      # alto del refuerzo, desde donde el pin entra en el escaneo
     provisionales: frozenset = frozenset()
     fuente: str = ""
@@ -77,13 +77,14 @@ ONEGUIDE = PerfilKit(
     profundidad_puente_mm=6.0,
     tolerancia_ajuste_mm={"impresa": 0.2, "fresada": 0.1},
     ajuste_pin_mm={"impresa": 0.3, "fresada": 0.1},
-    pared_refuerzo_pin_mm=2.0,
+    sobre_diametro_refuerzo_pin_mm=2.0,
     alto_refuerzo_pin_mm=3.0,
-    provisionales=frozenset({"sobrefresado_mm", "tolerancia_ajuste_mm", "alto_refuerzo_pin_mm"}),
+    provisionales=frozenset({"sobrefresado_mm", "tolerancia_ajuste_mm"}),
     fuente=("Catálogo y manual Hiossen OneGuide (orificios Ø5,0/Ø5,7, contacto 3 mm, sin camisa); "
             "offset, espesor, pared, holgura, ajustes y sobrefresado: decisiones clínicas 2026-10-08; "
             "tolerancia de ajuste dentro del rango aceptado el 2026-10-09 (impresa 0,20–0,30; fresada 0,10–0,15); "
-            "pines: ajuste como el del orificio y pared de refuerzo 2 mm (decisiones 2026-10-10), alto 3 mm provisional"),
+            "pines: ajuste como el del orificio y refuerzo = agujero + 2 mm en total (decisiones 2026-10-10 y "
+            "2026-10-13), alto 3 mm (confirmado el 2026-10-13, por ahora)"),
 )
 
 _KITS = {ONEGUIDE.nombre: ONEGUIDE}

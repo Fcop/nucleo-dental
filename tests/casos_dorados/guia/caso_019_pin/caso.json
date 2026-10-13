@@ -1,0 +1,9 @@
+{
+  "implante": {"diametro": 4.1, "largo": 10.0, "apice": [0, 0, -12.0], "eje": [0, 0, 1]},
+  "pin": {"diametro": 1.5, "largo": 12.0, "punta": [6.0, 0, -7.0], "eje": [0.7071067811865476, 0, 0.7071067811865476]},
+  "kit": "oneguide",
+  "fabricacion": "impresa",
+  "margen_pin_mm": 2.0,
+  "escena": "escaneo: caja x -15 a 20, y -10 a 10, z -20 a 0 (encía en z = 0); hueso: la misma caja hasta z = -1. Construidas en el test.",
+  "descripcion": "Corte frontal (y = 0). Implante A vertical en x = 0 (z de -12 a -2). Pin Ø1,5 de largo 12 con la punta en (6, -7), inclinado 45° hacia +x y arriba."
+}

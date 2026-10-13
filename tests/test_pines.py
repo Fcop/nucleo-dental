@@ -68,12 +68,12 @@ def test_profundidad_en_hueso(escena):
 
 
 def test_refuerzo_y_agujero(escena):
-    """Verifica R-025: entrada en la encía en (13, 0, 0); agujero Ø1,8 (1,5 + 0,3 impresa) y refuerzo Ø5,8 (pared 2)."""
+    """Verifica R-025: entrada en la encía en (13, 0, 0); agujero Ø1,8 (1,5 + 0,3 impresa) y refuerzo Ø3,8 (+ 2 en total)."""
     escaneo, _ = escena
     r = refuerzo_y_agujero(Pin(1.5, 12.0, [6, 0, -7], U45), escaneo, ONEGUIDE, "impresa")
     np.testing.assert_allclose(r["entrada"], [13, 0, 0], atol=1e-6)
     assert r["diametro_agujero_mm"] == pytest.approx(1.8)
-    assert r["diametro_refuerzo_mm"] == pytest.approx(5.8)
+    assert r["diametro_refuerzo_mm"] == pytest.approx(3.8)
     assert r["alto_refuerzo_mm"] == ONEGUIDE.alto_refuerzo_pin_mm
     fresada = refuerzo_y_agujero(Pin(1.5, 12.0, [6, 0, -7], U45), escaneo, ONEGUIDE, "fresada")
     assert fresada["diametro_agujero_mm"] == pytest.approx(1.6)
@@ -142,3 +142,26 @@ def test_medir_con_pines(tmp_path, capsys, escena):
         assert p1["estructuras"]["implante implante"]["margen_mm"] == 2.0
         if semaforo == "rojo":
             assert resultado["semaforo"] == "rojo"
+
+
+def test_caso_dorado_019_pin_junto_a_un_implante(escena):
+    """Verifica R-025 (caso dorado 019): profundidad 8,49, entrada (13, 0), agujero Ø1,8, refuerzo Ø3,8 y 3,42 mm al implante (verde)."""
+    from dorados import CASOS_DORADOS
+
+    carpeta = CASOS_DORADOS / "guia" / "caso_019_pin"
+    caso = json.loads((carpeta / "caso.json").read_text(encoding="utf-8"))
+    e = json.loads((carpeta / "esperado.json").read_text(encoding="utf-8"))
+    tol = e["tolerancia_mm"]
+    escaneo, hueso = escena
+    d = caso["pin"]
+    pin = Pin(d["diametro"], d["largo"], d["punta"], d["eje"])
+    implante = Implante(**{k: caso["implante"][k] for k in ("diametro", "largo", "apice", "eje")})
+
+    assert profundidad_en_hueso(pin, hueso) == pytest.approx(e["profundidad_en_hueso_mm"], abs=tol)
+    r = refuerzo_y_agujero(pin, escaneo, ONEGUIDE, caso["fabricacion"])
+    np.testing.assert_allclose(r["entrada"], e["entrada_en_encia"], atol=tol)
+    assert r["diametro_agujero_mm"] == pytest.approx(e["diametro_agujero_mm"], abs=tol)
+    assert r["diametro_refuerzo_mm"] == pytest.approx(e["diametro_refuerzo_mm"], abs=tol)
+    seguridad = evaluar_pin(pin, {}, {"A": implante}, caso["margen_pin_mm"])
+    assert seguridad["estructuras"]["implante A"]["distancia_mm"] == pytest.approx(e["distancia_pin_implante_mm"], abs=tol)
+    assert seguridad["semaforo"] == e["semaforo"]
