@@ -11,7 +11,10 @@ El usuario lo ubica con una caja ROI de Slicer, como las ventanas
   el texto SIGUE LA SUPERFICIE (en una caja plana sobre una superficie curva
   las letras de los extremos quedaban en el aire; probado 2026-10-13);
 - "afuera" es la cara de la caja más lejana del escaneo: desde ahí se lee el
-  texto derecho (sin espejo), con su "arriba" hacia el eje de inserción.
+  texto derecho (sin espejo), con su "arriba" hacia el eje de inserción;
+- en una cara oclusal (la caja mira a lo largo del eje de inserción) el
+  "arriba" va hacia vestibular: hacia afuera del arco, lejos del centro del
+  escaneo (decisión clínica 2026-10-15).
 
 Validación: el trazo de las letras mide al menos 0,5 mm (TRAZO_MINIMO_MM) y,
 si es grabado, bajo las letras queda al menos 1 mm de resina
@@ -25,6 +28,7 @@ import numpy as np
 TRAZO_MINIMO_MM = 0.5            # decisión clínica 2026-10-13
 RESINA_BAJO_GRABADO_MM = 1.0     # decisión clínica 2026-10-13
 MODOS = ("grabado", "relieve")
+COSENO_CARA_OCLUSAL = np.cos(np.radians(45))   # caja que mira a menos de 45° del eje de inserción
 _PASO_RASTER_MM = 0.05           # resolución de la imagen 2D de las letras
 _SUAVE_RASTER_PX = 4             # semiancho del suavizado del borde (0,2 mm): el campo satura a ±0,2 mm
 _LOTE_TRIANGULOS = 32
@@ -111,8 +115,18 @@ def _marco(caja: dict, escaneo, eje_insercion):
     distancia = _distancia_a(escaneo)(lados)
     n = a3 if distancia[0] >= distancia[1] else -a3
     v = a2
-    if eje_insercion is not None and abs(np.dot(a2, eje_insercion)) > 0.2 and np.dot(a2, eje_insercion) < 0:
-        v = -a2
+    if eje_insercion is not None:
+        eje = np.asarray(eje_insercion, dtype=float) / np.linalg.norm(eje_insercion)
+        if abs(np.dot(n, eje)) >= COSENO_CARA_OCLUSAL:
+            # Cara oclusal: "arriba" hacia vestibular, lejos del centro del arco (media del escaneo) en el plano oclusal.
+            from vtk.util import numpy_support
+            media = numpy_support.vtk_to_numpy(escaneo.GetPoints().GetData()).mean(axis=0)
+            vestibular = centro - media
+            vestibular -= np.dot(vestibular, eje) * eje
+            if np.dot(a2, vestibular) < 0:
+                v = -a2
+        elif abs(np.dot(a2, eje)) > 0.2 and np.dot(a2, eje) < 0:
+            v = -a2
     u = np.cross(v, n)                                    # u × v = n: se lee derecho mirando desde afuera
     return centro, u, v, n, largo, alto, profundidad
 

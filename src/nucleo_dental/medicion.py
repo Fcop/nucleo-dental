@@ -98,7 +98,7 @@ def medir(implante: Implante, malla_canal: vtk.vtkPolyData,
     margen = float(margen)
     if not np.isfinite(margen) or margen < 0:
         raise ValueError(f"El margen debe ser un número mayor o igual que 0 mm (se recibió {margen}).")
-    _exigir_superficie_cerrada(malla_canal)
+    _exigir_superficie_cerrada(malla_canal, "canal")
 
     vertices = numpy_support.vtk_to_numpy(malla_canal.GetPoints().GetData()).astype(float)
     superficie = implante.puntos_superficie(PASO_MUESTREO_MM)
@@ -173,7 +173,7 @@ def espesor_oseo(implante: Implante, malla_hueso: vtk.vtkPolyData, margen: float
     margen = MARGEN_HUESO_POR_DEFECTO_MM if margen is None else float(margen)
     if not np.isfinite(margen) or margen < 0:
         raise ValueError(f"El margen debe ser un número mayor o igual que 0 mm (se recibió {margen}).")
-    _exigir_superficie_cerrada(malla_hueso)
+    _exigir_superficie_cerrada(malla_hueso, "hueso")
     # Las cavidades internas (rodeadas de hueso) no cuentan para el espesor;
     # solo se informan si el implante las toca (decisión clínica 2026-10-08).
     malla_hueso, cavidades = _separar_cavidades(malla_hueso)
@@ -337,7 +337,7 @@ def evaluar_plan(implante: Implante, estructuras: dict, sobrefresado_mm: float =
             por_estructura[nombre] = espesor_oseo(implante, malla, margen)
             continue
         if nombre in ESTRUCTURAS_BAJO_PLATAFORMA:
-            _exigir_superficie_cerrada(malla)
+            _exigir_superficie_cerrada(malla, nombre)
             malla = recortar_bajo_plataforma(malla, implante)
             if malla is None:
                 raise ValueError(f"La malla de {nombre} no tiene ninguna parte bajo la plataforma del implante; "
@@ -365,7 +365,7 @@ def _penetracion(implante, malla_canal, distancia_al_canal, d_superficie) -> flo
     return float(max(-mas_hondo, 0.0))
 
 
-def _exigir_superficie_cerrada(malla: vtk.vtkPolyData) -> None:
+def _exigir_superficie_cerrada(malla: vtk.vtkPolyData, nombre: str = "estructura") -> None:
     """Sin superficie cerrada no hay 'dentro' ni 'fuera': la colisión sería indecidible."""
     bordes = vtk.vtkFeatureEdges()
     bordes.SetInputData(malla)
@@ -377,7 +377,7 @@ def _exigir_superficie_cerrada(malla: vtk.vtkPolyData) -> None:
     n = bordes.GetOutput().GetNumberOfCells()
     if n:
         raise ValueError(
-            f"La malla de la estructura (canal o dientes) no es una superficie cerrada ({n} aristas abiertas "
+            f"La malla de {nombre} no es una superficie cerrada ({n} aristas abiertas "
             "o no manifold). Ciérrala (tapas en los extremos) antes de medir.")
 
 

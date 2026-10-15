@@ -145,13 +145,29 @@ def test_relieve_suma_material():
 
 
 def test_el_texto_se_lee_derecho_desde_afuera():
-    """Verifica R-026: mirando la guía desde afuera (+z), la "L" tiene el trazo vertical a la izquierda y el pie hacia la derecha."""
-    info = texto_como_malla("L", _caja(0.8), ENCIA, np.array([0, 0, 1.0]))
+    """Verifica R-026: mirando la guía desde afuera (+z), la "L" tiene el trazo vertical a la izquierda y el pie hacia la derecha.
+
+    La caja está en y = +6, vestibular respecto del centro del escaneo (y ≈ −1): el arriba del texto es +y.
+    """
+    info = texto_como_malla("L", _caja(0.8, centro=(2.0, 6.0, 2.6)), ENCIA, np.array([0, 0, 1.0]))
     puntos = numpy_support.vtk_to_numpy(info["malla"].GetPoints().GetData())
     np.testing.assert_allclose(info["afuera"], [0, 0, 1])
     y_medio = (puntos[:, 1].min() + puntos[:, 1].max()) / 2
     arriba, abajo = puntos[puntos[:, 1] > y_medio], puntos[puntos[:, 1] < y_medio]
     assert arriba[:, 0].max() < abajo[:, 0].max()          # el pie de la L se extiende a la derecha (+x)
+
+
+def test_en_cara_oclusal_el_arriba_va_hacia_vestibular():
+    """Verifica R-026: en una cara oclusal el arriba del texto apunta a vestibular (lejos del centro del escaneo).
+
+    Con la caja en y = −8 (vestibular = −y), leído desde +z: arriba = −y y el renglón avanza hacia −x,
+    así que el pie de la "L" (abajo, +y) se extiende hacia −x más allá del trazo vertical.
+    """
+    info = texto_como_malla("L", _caja(0.8), ENCIA, np.array([0, 0, 1.0]))
+    puntos = numpy_support.vtk_to_numpy(info["malla"].GetPoints().GetData())
+    y_medio = (puntos[:, 1].min() + puntos[:, 1].max()) / 2
+    arriba, abajo = puntos[puntos[:, 1] < y_medio], puntos[puntos[:, 1] > y_medio]
+    assert abajo[:, 0].min() < arriba[:, 0].min()
 
 
 @pytest.fixture(scope="module")
